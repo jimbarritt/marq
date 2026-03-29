@@ -40,15 +40,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         window = NSWindow(
             contentRect: windowRect,
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.toolbar = nil
+        window.isMovableByWindowBackground = true
 
         let fileName = filePath.isEmpty ? "marq" : URL(fileURLWithPath: filePath).lastPathComponent
         window.title = "\(fileName) — marq"
         window.contentView = webView
         window.makeKeyAndOrderFront(nil)
+
+        // Build menu bar with Quit item
+        let mainMenu = NSMenu()
+
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About marq", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit marq", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let appMenuItem = NSMenuItem()
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        NSApp.mainMenu = mainMenu
 
         // Load template HTML
         if let templateURL = Bundle.module.url(forResource: "template", withExtension: "html", subdirectory: "Resources") {
