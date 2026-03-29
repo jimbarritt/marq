@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>marq</title>
+
+<!-- GitHub Markdown CSS -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown-light.min.css">
+
+<!-- Highlight.js -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+<!-- Marked.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+
+<!-- MathJax -->
+<script>
+window.MathJax = {
+    tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']]
+    },
+    startup: {
+        ready: function() {
+            MathJax.startup.defaultReady();
+        }
+    }
+};
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.min.js"></script>
+
+<!-- Mermaid -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+        background: #ffffff;
+        color: #1f2328;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+        padding: 32px;
+        padding-top: 16px;
+    }
+
+    .markdown-body {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 24px;
+    }
+
+    /* Copy as Markdown button */
+    #copy-md-btn {
+        position: fixed;
+        top: 12px;
+        right: 16px;
+        z-index: 1000;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-size: 12px;
+        color: #1f2328;
+        cursor: pointer;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        transition: background 0.15s;
+    }
+    #copy-md-btn:hover { background: #eaeef2; }
+    #copy-md-btn.copied {
+        background: #2da44e;
+        color: white;
+        border-color: #2da44e;
+    }
+
+    /* Code block copy button */
+    .code-block-wrapper {
+        position: relative;
+    }
+    .code-copy-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(246, 248, 250, 0.9);
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.15s;
+        color: #1f2328;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .code-block-wrapper:hover .code-copy-btn { opacity: 1; }
+    .code-copy-btn.copied {
+        background: #2da44e;
+        color: white;
+        border-color: #2da44e;
+    }
+
+    /* Search overlay */
+    #search-overlay {
+        display: none;
+        position: fixed;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 2000;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        border-radius: 8px;
+        padding: 8px 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    #search-overlay.active { display: flex; align-items: center; gap: 8px; }
+    #search-input {
+        border: 1px solid #d0d7de;
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 14px;
+        outline: none;
+        min-width: 280px;
+        background: white;
+    }
+    #search-input:focus { border-color: #0969da; box-shadow: 0 0 0 3px rgba(9,105,218,0.3); }
+    #search-count {
+        font-size: 12px;
+        color: #656d76;
+        white-space: nowrap;
+    }
+
+    /* Search highlight */
+    mark.search-highlight {
+        background: #fff8c5;
+        padding: 1px 2px;
+        border-radius: 2px;
+    }
+    mark.search-highlight.current {
+        background: #fdac54;
+    }
+
+    /* Mermaid diagrams */
+    .mermaid {
+        text-align: center;
+        margin: 16px 0;
+    }
+</style>
+</head>
+<body>
+
+<button id="copy-md-btn" onclick="copyMarkdown()">Copy Markdown</button>
+
+<div id="search-overlay">
+    <input type="text" id="search-input" placeholder="Search..." />
+    <span id="search-count"></span>
+</div>
+
+<article class="markdown-body" id="content"></article>
+
+<script>
+// Raw markdown storage
+let rawMarkdown = '';
+
+// Search state
+let searchMatches = [];
+let currentMatchIndex = -1;
+let originalHTML = '';
+
+// Configure marked
+marked.setOptions({
+    gfm: true,
+    breaks: false,
+    highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+            return hljs.highlight(code, { language: lang }).value;
+        }
+        return hljs.highlightAuto(code).value;
+    }
+});
+
+// Custom renderer for mermaid and code blocks
+const renderer = new marked.Renderer();
+const originalCodeRenderer = renderer.code.bind(renderer);
+
+renderer.code = function(code) {
+    // Handle both marked v12 object style and older string style
+    let text, lang;
+    if (typeof code === 'object') {
+        text = code.text;
+        lang = code.lang;
+    } else {
+        text = code;
+        lang = arguments[1];
+    }
+
+    if (lang === 'mermaid') {
+        return '<div class="mermaid">' + text + '</div>';
+    }
+
+    let highlighted;
+    if (lang && hljs.getLanguage(lang)) {
+        highlighted = hljs.highlight(text, { language: lang }).value;
+    } else {
+        highlighted = hljs.highlightAuto(text).value;
+    }
+
+    const langLabel = lang ? lang : '';
+    return '<div class="code-block-wrapper">' +
+        '<button class="code-copy-btn" onclick="copyCode(this)">Copy</button>' +
+        '<pre><code class="hljs language-' + langLabel + '">' + highlighted + '</code></pre>' +
+        '</div>';
+};
+
+marked.setOptions({ renderer: renderer });
+
+function renderMarkdown(md) {
+    rawMarkdown = md;
+    clearSearch();
+
+    const content = document.getElementById('content');
+    content.innerHTML = marked.parse(md);
+    originalHTML = content.innerHTML;
+
+    // Render mermaid diagrams
+    if (typeof mermaid !== 'undefined') {
+        mermaid.initialize({ startOnLoad: false, theme: 'default' });
+        mermaid.run({ nodes: document.querySelectorAll('.mermaid') }).catch(function(e) {
+            console.warn('Mermaid render error:', e);
+        });
+    }
+
+    // Typeset math
+    if (typeof MathJax !== 'undefined' && MathJax.typesetPromise) {
+        MathJax.typesetPromise([content]).catch(function(e) {
+            console.warn('MathJax error:', e);
+        });
+    }
+}
+
+function copyMarkdown() {
+    const btn = document.getElementById('copy-md-btn');
+    navigator.clipboard.writeText(rawMarkdown).then(function() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+            btn.textContent = 'Copy Markdown';
+            btn.classList.remove('copied');
+        }, 2000);
+    });
+}
+
+function copyCode(btn) {
+    const code = btn.parentElement.querySelector('code').textContent;
+    navigator.clipboard.writeText(code).then(function() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+        }, 2000);
+    });
+}
+
+// --- Vim-style navigation ---
+let gPressed = false;
+let gTimeout = null;
+
+document.addEventListener('keydown', function(e) {
+    const searchOverlay = document.getElementById('search-overlay');
+    const searchInput = document.getElementById('search-input');
+    const isSearchActive = searchOverlay.classList.contains('active');
+
+    // If search is active, handle search-specific keys
+    if (isSearchActive) {
+        if (e.key === 'Escape') {
+            closeSearch();
+            e.preventDefault();
+            return;
+        }
+        if (e.key === 'Enter') {
+            if (e.shiftKey) {
+                prevMatch();
+            } else {
+                nextMatch();
+            }
+            e.preventDefault();
+            return;
+        }
+        return; // Let other keys work in the search input
+    }
+
+    // Don't capture keys if typing in an input/textarea
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    const scrollAmount = 60;
+    const halfPage = window.innerHeight / 2;
+
+    // Ctrl-D: half page down
+    if (e.ctrlKey && e.key === 'd') {
+        window.scrollBy({ top: halfPage, behavior: 'smooth' });
+        e.preventDefault();
+        return;
+    }
+
+    // Ctrl-U: half page up
+    if (e.ctrlKey && e.key === 'u') {
+        window.scrollBy({ top: -halfPage, behavior: 'smooth' });
+        e.preventDefault();
+        return;
+    }
+
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    switch (e.key) {
+        case 'j':
+            window.scrollBy({ top: scrollAmount, behavior: 'auto' });
+            e.preventDefault();
+            break;
+        case 'k':
+            window.scrollBy({ top: -scrollAmount, behavior: 'auto' });
+            e.preventDefault();
+            break;
+        case 'G':
+            if (!e.shiftKey) break;
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            e.preventDefault();
+            gPressed = false;
+            break;
+        case 'g':
+            if (gPressed) {
+                // gg - go to top
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                e.preventDefault();
+                gPressed = false;
+                clearTimeout(gTimeout);
+            } else {
+                gPressed = true;
+                gTimeout = setTimeout(function() { gPressed = false; }, 500);
+            }
+            break;
+        case '/':
+            openSearch();
+            e.preventDefault();
+            break;
+        case 'n':
+            nextMatch();
+            e.preventDefault();
+            break;
+        case 'N':
+            prevMatch();
+            e.preventDefault();
+            break;
+    }
+});
+
+// G is shift+g, fix the handler
+document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (document.getElementById('search-overlay').classList.contains('active')) return;
+    if (e.key === 'G' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        e.preventDefault();
+    }
+});
+
+// --- Search ---
+function openSearch() {
+    const overlay = document.getElementById('search-overlay');
+    const input = document.getElementById('search-input');
+    overlay.classList.add('active');
+    input.value = '';
+    input.focus();
+    input.addEventListener('input', onSearchInput);
+}
+
+function closeSearch() {
+    const overlay = document.getElementById('search-overlay');
+    overlay.classList.remove('active');
+    clearSearch();
+}
+
+function clearSearch() {
+    searchMatches = [];
+    currentMatchIndex = -1;
+    document.getElementById('search-count').textContent = '';
+    // Restore original HTML to remove highlights
+    if (originalHTML) {
+        document.getElementById('content').innerHTML = originalHTML;
+    }
+}
+
+function onSearchInput(e) {
+    const query = e.target.value;
+    if (!query) {
+        clearSearch();
+        return;
+    }
+    performSearch(query);
+}
+
+function performSearch(query) {
+    // Restore original HTML first
+    const content = document.getElementById('content');
+    content.innerHTML = originalHTML;
+
+    if (!query) return;
+
+    // Use TreeWalker to find text nodes
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, null, false);
+    const textNodes = [];
+    while (walker.nextNode()) {
+        textNodes.push(walker.currentNode);
+    }
+
+    searchMatches = [];
+    const lowerQuery = query.toLowerCase();
+
+    textNodes.forEach(function(node) {
+        const text = node.textContent;
+        const lowerText = text.toLowerCase();
+        let startIdx = 0;
+        let idx;
+        const ranges = [];
+
+        while ((idx = lowerText.indexOf(lowerQuery, startIdx)) !== -1) {
+            ranges.push({ start: idx, end: idx + query.length });
+            startIdx = idx + 1;
+        }
+
+        // Process ranges in reverse to maintain positions
+        for (let i = ranges.length - 1; i >= 0; i--) {
+            const range = ranges[i];
+            const before = text.substring(0, range.start);
+            const match = text.substring(range.start, range.end);
+            const after = text.substring(range.end);
+
+            const mark = document.createElement('mark');
+            mark.className = 'search-highlight';
+            mark.textContent = match;
+
+            const parent = node.parentNode;
+            if (after) parent.insertBefore(document.createTextNode(after), node.nextSibling);
+            parent.insertBefore(mark, node.nextSibling);
+            if (before) parent.insertBefore(document.createTextNode(before), node.nextSibling);
+            parent.removeChild(node);
+
+            searchMatches.unshift(mark);
+            node = parent.childNodes[0]; // Update reference
+        }
+    });
+
+    // Re-collect marks in document order
+    searchMatches = Array.from(content.querySelectorAll('mark.search-highlight'));
+
+    if (searchMatches.length > 0) {
+        currentMatchIndex = 0;
+        highlightCurrentMatch();
+    }
+
+    updateSearchCount();
+}
+
+function highlightCurrentMatch() {
+    searchMatches.forEach(function(m, i) {
+        m.classList.toggle('current', i === currentMatchIndex);
+    });
+    if (searchMatches[currentMatchIndex]) {
+        searchMatches[currentMatchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
+function nextMatch() {
+    if (searchMatches.length === 0) return;
+    currentMatchIndex = (currentMatchIndex + 1) % searchMatches.length;
+    highlightCurrentMatch();
+    updateSearchCount();
+}
+
+function prevMatch() {
+    if (searchMatches.length === 0) return;
+    currentMatchIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
+    highlightCurrentMatch();
+    updateSearchCount();
+}
+
+function updateSearchCount() {
+    const el = document.getElementById('search-count');
+    if (searchMatches.length === 0) {
+        el.textContent = 'No matches';
+    } else {
+        el.textContent = (currentMatchIndex + 1) + ' / ' + searchMatches.length;
+    }
+}
+</script>
+
+</body>
+</html>
