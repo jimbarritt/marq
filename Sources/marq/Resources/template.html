@@ -34,10 +34,54 @@
         padding-top: 16px;
     }
 
-    .markdown-body {
-        max-width: 980px;
+    #page-wrapper {
+        display: flex;
+        max-width: 1060px;
         margin: 0 auto;
-        padding: 24px;
+    }
+
+    #line-gutter {
+        position: relative;
+        width: 48px;
+        min-width: 48px;
+        border-right: 1px solid #d0d7de;
+        margin-right: 16px;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    .gutter-block {
+        position: absolute;
+        left: 0;
+        right: 0;
+        display: flex;
+        align-items: flex-start;
+        padding-top: 4px;
+        justify-content: flex-end;
+        padding-right: 8px;
+    }
+
+    .gutter-block:nth-child(odd) {
+        background: #e2e6ea;
+    }
+
+    .gutter-block:nth-child(even) {
+        background: #ffffff;
+    }
+
+    .line-number {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 12px;
+        line-height: 1;
+        color: #8b949e;
+        text-align: right;
+    }
+
+    .markdown-body {
+        flex: 1;
+        min-width: 0;
+        max-width: 980px;
+        padding: 0;
     }
 
     /* Copy as Markdown button */
@@ -147,7 +191,10 @@
     <span id="search-count"></span>
 </div>
 
-<article class="markdown-body" id="content"></article>
+<div id="page-wrapper">
+    <div id="line-gutter"></div>
+    <article class="markdown-body" id="content"></article>
+</div>
 
 <script>
 // Raw markdown storage
@@ -173,6 +220,9 @@ let searchMatches = [];
 let currentMatchIndex = -1;
 let originalHTML = '';
 
+// Track source line numbers for each block token
+let blockLineMap = []; // [{line, endLine}] populated during parse
+
 // Configure marked
 marked.setOptions({
     gfm: true,
@@ -185,12 +235,21 @@ marked.setOptions({
     }
 });
 
-// Custom renderer for mermaid and code blocks
+// Custom renderer for mermaid and code blocks, with data-line attributes
 const renderer = new marked.Renderer();
-const originalCodeRenderer = renderer.code.bind(renderer);
+
+// Wrap block-level output with data-source-line from our line map
+let blockIndex = 0;
+
+function wrapWithLine(html, token) {
+    // Use a marker div to carry the source line number
+    if (token && token._sourceLine != null) {
+        return '<div data-source-line="' + token._sourceLine + '">' + html + '</div>';
+    }
+    return html;
+}
 
 renderer.code = function(code) {
-    // Handle both marked v12 object style and older string style
     let text, lang;
     if (typeof code === 'object') {
         text = code.text;
@@ -220,12 +279,78 @@ renderer.code = function(code) {
 
 marked.setOptions({ renderer: renderer });
 
+// Use walkTokens to stamp source line numbers onto top-level block tokens
+marked.use({
+    walkTokens: function(token) {
+        // marked tokens don't have line numbers built-in, so we compute them
+        // during the pre-parse step below
+    }
+});
+
+// Compute line numbers by finding each block token's raw text in the source
+function computeLineNumbers(src) {
+    const tokens = marked.lexer(src);
+    let offset = 0;
+    const lines = src.split('\n');
+
+    // Map character offset to line number
+    function charToLine(charIdx) {
+        let chars = 0;
+        for (let i = 0; i < lines.length; i++) {
+            chars += lines[i].length + 1; // +1 for \n
+            if (chars > charIdx) return i + 1; // 1-based
+        }
+        return lines.length;
+    }
+
+    // Walk top-level tokens and find their position in source
+    let searchFrom = 0;
+    tokens.forEach(function(token) {
+        if (token.raw) {
+            const idx = src.indexOf(token.raw, searchFrom);
+            if (idx >= 0) {
+                token._sourceLine = charToLine(idx);
+                searchFrom = idx + token.raw.length;
+            }
+        }
+    });
+
+    return tokens;
+}
+
+// Render tokens to HTML, wrapping each top-level block with data-source-line
+function renderWithLineNumbers(src) {
+    const tokens = computeLineNumbers(src);
+    let html = '';
+    tokens.forEach(function(token) {
+        const tokenHtml = marked.parser([Object.assign({}, { links: tokens.links }), token].slice(1));
+        // marked.parser expects a token list with links — use a different approach
+    });
+    // Simpler: render normally, then inject data attributes via post-processing
+    // We'll use a different strategy: render each token individually
+    let parts = [];
+    tokens.links = tokens.links || {};
+
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        const singleList = [token];
+        singleList.links = tokens.links;
+        const rendered = marked.parser(singleList);
+        if (token._sourceLine != null) {
+            parts.push('<div data-source-line="' + token._sourceLine + '">' + rendered + '</div>');
+        } else {
+            parts.push(rendered);
+        }
+    }
+    return parts.join('');
+}
+
 function renderMarkdown(md) {
     rawMarkdown = md;
     clearSearch();
 
     const content = document.getElementById('content');
-    content.innerHTML = marked.parse(md);
+    content.innerHTML = renderWithLineNumbers(md);
     originalHTML = content.innerHTML;
 
     // Render mermaid diagrams
@@ -248,6 +373,76 @@ function renderMarkdown(md) {
             throwOnError: false
         });
     }
+
+    // Build line number gutter — defer slightly so layout settles,
+    // then rebuild again after all images load
+    requestAnimationFrame(function() { buildGutter(); });
+
+    const images = content.querySelectorAll('img');
+    let loaded = 0;
+    const total = images.length;
+    if (total > 0) {
+        images.forEach(function(img) {
+            if (img.complete) {
+                loaded++;
+                if (loaded === total) buildGutter();
+            } else {
+                img.addEventListener('load', function() {
+                    loaded++;
+                    if (loaded === total) buildGutter();
+                });
+                img.addEventListener('error', function() {
+                    loaded++;
+                    if (loaded === total) buildGutter();
+                });
+            }
+        });
+    }
+}
+
+function buildGutter() {
+    const gutter = document.getElementById('line-gutter');
+    const content = document.getElementById('content');
+    gutter.innerHTML = '';
+
+    const elements = content.querySelectorAll('[data-source-line]');
+    const contentRect = content.getBoundingClientRect();
+    let seenLines = new Set();
+    // Collect unique entries with their top positions
+    let entries = [];
+
+    elements.forEach(function(el) {
+        const line = el.getAttribute('data-source-line');
+        if (seenLines.has(line)) return;
+        seenLines.add(line);
+
+        const rect = el.getBoundingClientRect();
+        const top = rect.top - contentRect.top;
+        entries.push({ line: line, top: top });
+    });
+
+    const totalHeight = content.scrollHeight;
+
+    // Create striped blocks spanning from one entry to the next
+    for (let i = 0; i < entries.length; i++) {
+        const top = entries[i].top;
+        const bottom = (i + 1 < entries.length) ? entries[i + 1].top : totalHeight;
+        const height = bottom - top;
+
+        const block = document.createElement('div');
+        block.className = 'gutter-block';
+        block.style.top = top + 'px';
+        block.style.height = height + 'px';
+
+        const num = document.createElement('span');
+        num.className = 'line-number';
+        num.textContent = entries[i].line;
+        block.appendChild(num);
+
+        gutter.appendChild(block);
+    }
+
+    gutter.style.height = totalHeight + 'px';
 }
 
 function copyMarkdown() {
@@ -273,6 +468,13 @@ function copyCode(btn) {
         }, 2000);
     });
 }
+
+// Reposition gutter line numbers on resize (wrapping changes positions)
+window.addEventListener('resize', function() {
+    if (document.querySelectorAll('[data-source-line]').length > 0) {
+        buildGutter();
+    }
+});
 
 // --- Vim-style navigation ---
 let gPressed = false;
