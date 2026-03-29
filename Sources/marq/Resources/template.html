@@ -6,33 +6,22 @@
 <title>marq</title>
 
 <!-- GitHub Markdown CSS -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown-light.min.css">
+<link rel="stylesheet" href="vendor/css/github-markdown-light.min.css">
 
 <!-- Highlight.js -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="vendor/css/highlight-github.min.css">
+<script src="vendor/js/highlight.min.js"></script>
 
 <!-- Marked.js -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+<script src="vendor/js/marked.min.js"></script>
 
-<!-- MathJax -->
-<script>
-window.MathJax = {
-    tex: {
-        inlineMath: [['$', '$'], ['\\(', '\\)']],
-        displayMath: [['$$', '$$'], ['\\[', '\\]']]
-    },
-    startup: {
-        ready: function() {
-            MathJax.startup.defaultReady();
-        }
-    }
-};
-</script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.min.js"></script>
+<!-- KaTeX (math/LaTeX) -->
+<link rel="stylesheet" href="vendor/css/katex.min.css">
+<script src="vendor/js/katex.min.js"></script>
+<script src="vendor/js/katex-auto-render.min.js"></script>
 
 <!-- Mermaid -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<script src="vendor/js/mermaid.min.js"></script>
 
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -164,6 +153,21 @@ window.MathJax = {
 // Raw markdown storage
 let rawMarkdown = '';
 
+// Intercept clicks on relative markdown links
+document.addEventListener('click', function(e) {
+    const link = e.target.closest('a');
+    if (!link) return;
+    const href = link.getAttribute('href');
+    if (!href) return;
+    // Skip external links and anchors
+    if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('#')) return;
+    // Navigate to relative markdown file via Swift
+    if (href.endsWith('.md') || href.endsWith('.markdown')) {
+        e.preventDefault();
+        window.webkit.messageHandlers.navigate.postMessage(href);
+    }
+});
+
 // Search state
 let searchMatches = [];
 let currentMatchIndex = -1;
@@ -232,10 +236,16 @@ function renderMarkdown(md) {
         });
     }
 
-    // Typeset math
-    if (typeof MathJax !== 'undefined' && MathJax.typesetPromise) {
-        MathJax.typesetPromise([content]).catch(function(e) {
-            console.warn('MathJax error:', e);
+    // Typeset math with KaTeX
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(content, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+                { left: '\\[', right: '\\]', display: true },
+                { left: '\\(', right: '\\)', display: false }
+            ],
+            throwOnError: false
         });
     }
 }

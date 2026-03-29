@@ -13,6 +13,7 @@ final class FileWatcher {
     }
 
     func start() {
+        stop()
         let fd = open(path, O_EVTONLY)
         guard fd >= 0 else {
             print("marq: unable to watch file: \(path)")
@@ -30,7 +31,19 @@ final class FileWatcher {
             let now = Date()
             guard now.timeIntervalSince(self.lastFired) > self.debounceInterval else { return }
             self.lastFired = now
-            self.onChange()
+
+            let flags = source.data
+            if flags.contains(.rename) || flags.contains(.delete) {
+                // File was replaced (atomic save) — re-establish watch
+                self.source?.cancel()
+                self.source = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.start()
+                    self?.onChange()
+                }
+            } else {
+                self.onChange()
+            }
         }
 
         source.setCancelHandler {
