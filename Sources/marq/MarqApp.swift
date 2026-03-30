@@ -18,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var rawMarkdown: String = ""
     var history: [String] = []
     var historyIndex: Int = -1
+    var pendingOpenFile: String?
 
     func log(_ msg: String) {
         let ts = ISO8601DateFormatter().string(from: Date())
@@ -27,6 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         log("Starting up")
+
         // Resolve file path from CLI args
         let args = CommandLine.arguments
         if args.count > 1 {
@@ -108,6 +110,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
+        // Edit menu (enables Cmd+C/V/X/A in WKWebView)
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editMenuItem = NSMenuItem()
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
         // Navigate menu with back/forward (Cmd+Left / Cmd+Right)
         let navMenu = NSMenu(title: "Navigate")
         let backItem = NSMenuItem(title: "Back", action: #selector(navigateBack), keyEquivalent: String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)))
@@ -137,10 +149,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             log("ERROR: Could not find template.html in bundle")
         }
 
+        // If a file was passed via open -a (Apple Event), use it
+        if filePath.isEmpty, let pending = pendingOpenFile {
+            filePath = pending
+            pendingOpenFile = nil
+            log("Using file from open -a: \(filePath)")
+        }
+
         // Push initial file to history
         if !filePath.isEmpty {
             history = [filePath]
             historyIndex = 0
+            let fileName = URL(fileURLWithPath: filePath).lastPathComponent
+            window.title = "\(fileName) — Marq"
         }
 
         // Start file watcher
@@ -260,6 +281,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        if let path = filenames.first, path.hasSuffix(".md") || path.hasSuffix(".markdown") || path.hasSuffix(".mdown") || path.hasSuffix(".mkd") {
+            log("Opened via file association: \(path)")
+            if webView != nil {
+                filePath = path
+                loadAndInject()
+                startWatching()
+                let fileName = URL(fileURLWithPath: path).lastPathComponent
+                window.title = "\(fileName) — Marq"
+            } else {
+                // WebView not ready yet — defer until applicationDidFinishLaunching completes
+                pendingOpenFile = path
+            }
+        }
+        sender.reply(toOpenOrPrint: .success)
     }
 }
 

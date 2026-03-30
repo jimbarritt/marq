@@ -7,6 +7,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "marq",
+            exclude: ["Info.plist"],
             resources: [.copy("Resources")]
         )
     ]

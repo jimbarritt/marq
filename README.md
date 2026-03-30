@@ -1,8 +1,27 @@
-# marq
+# Marq
 
 A macOS desktop app that renders markdown files in a native window with live reload.
 
 See [examples/test.md](examples/test.md) for a demo of all supported features.
+
+## Install
+
+```bash
+brew tap jimbarritt/tap
+brew install --cask marq
+```
+
+Since Marq is currently unsigned, you'll need to allow it past Gatekeeper on first run:
+
+```bash
+xattr -cr /Applications/Marq.app
+```
+
+Then open any markdown file with:
+
+```bash
+open -a Marq path/to/file.md
+```
 
 ## Features
 
@@ -20,14 +39,14 @@ See [examples/test.md](examples/test.md) for a demo of all supported features.
 ## Usage
 
 ```bash
-swift run marq path/to/file.md
+open -a Marq path/to/file.md
 ```
 
-Or build a release binary:
+### Building from source
 
 ```bash
-swift build -c release
-.build/release/marq file.md
+just bundle        # builds build/Marq.app
+just run-app       # builds and opens with test doc
 ```
 
 ## Keyboard Shortcuts
@@ -46,5 +65,5 @@ swift build -c release
 
 ## Requirements
 
-- macOS 13+
+- macOS 14+
 - Swift 5.9+
