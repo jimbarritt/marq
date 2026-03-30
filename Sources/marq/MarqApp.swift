@@ -287,11 +287,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let path = filenames.first, path.hasSuffix(".md") || path.hasSuffix(".markdown") || path.hasSuffix(".mdown") || path.hasSuffix(".mkd") {
             log("Opened via file association: \(path)")
             if webView != nil {
-                filePath = path
-                loadAndInject()
-                startWatching()
-                let fileName = URL(fileURLWithPath: path).lastPathComponent
-                window.title = "\(fileName) — Marq"
+                navigateTo(path)
             } else {
                 // WebView not ready yet — defer until applicationDidFinishLaunching completes
                 pendingOpenFile = path
@@ -324,6 +320,19 @@ extension AppDelegate: WKScriptMessageHandler {
         }
         guard message.name == "navigate", let href = message.body as? String else { return }
         log("Navigate request: \(href)")
+
+        let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        log("Nav trimmed='\(trimmed)' bytes=\(Array(trimmed.utf8))")
+        if trimmed == "back" {
+            log("Going back: historyIndex=\(historyIndex) history=\(history.count)")
+            navigateBack()
+            return
+        }
+        if trimmed == "forward" {
+            log("Going forward: historyIndex=\(historyIndex) history=\(history.count)")
+            navigateForward()
+            return
+        }
 
         // Resolve relative path against current file's directory
         let baseDir = URL(fileURLWithPath: filePath).deletingLastPathComponent()

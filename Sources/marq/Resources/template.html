@@ -89,12 +89,18 @@
         padding: 0;
     }
 
-    /* Copy as Markdown button */
-    #copy-md-btn {
+    /* Top-right toolbar */
+    .toolbar {
         position: fixed;
         top: 12px;
         right: 16px;
         z-index: 1000;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .toolbar button {
         background: #f6f8fa;
         border: 1px solid #d0d7de;
         border-radius: 6px;
@@ -102,10 +108,15 @@
         font-size: 12px;
         color: #1f2328;
         cursor: pointer;
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-        transition: background 0.15s;
+        transition: background 0.15s, opacity 0.15s;
     }
-    #copy-md-btn:hover { background: #eaeef2; }
+    .toolbar button:hover { background: #eaeef2; }
+    .toolbar button:disabled {
+        opacity: 0.3;
+        cursor: default;
+    }
+    .toolbar button:disabled:hover { background: #f6f8fa; }
+    .nav-btn { padding: 5px 8px; color: #656d76; }
     #copy-md-btn.copied {
         background: #2da44e;
         color: white;
@@ -247,7 +258,11 @@
 </head>
 <body>
 
-<button id="copy-md-btn" onclick="copyMarkdown()">Copy Markdown</button>
+<div class="toolbar">
+    <button class="nav-btn" id="nav-back" onclick="navBack()" title="Back">&larr;</button>
+    <button class="nav-btn" id="nav-forward" onclick="navForward()" title="Forward">&rarr;</button>
+    <button id="copy-md-btn" onclick="copyMarkdown()">Copy Markdown</button>
+</div>
 
 <div id="help-overlay" onclick="closeHelp()">
     <div id="help-panel" onclick="event.stopPropagation()">
@@ -544,6 +559,13 @@ function closeHelp() {
 
 function toggleGutter() {
     document.getElementById('line-gutter').classList.toggle('hidden');
+}
+
+function navBack() {
+    try { window.webkit.messageHandlers.navigate.postMessage('back'); } catch(e) { console.error('navBack failed', e); }
+}
+function navForward() {
+    try { window.webkit.messageHandlers.navigate.postMessage('forward'); } catch(e) { console.error('navForward failed', e); }
 }
 
 function copyMarkdown() {
