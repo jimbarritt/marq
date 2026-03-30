@@ -50,6 +50,10 @@
         -webkit-user-select: none;
     }
 
+    #line-gutter.hidden {
+        display: none;
+    }
+
     .gutter-block {
         position: absolute;
         left: 0;
@@ -445,6 +449,10 @@ function buildGutter() {
     gutter.style.height = totalHeight + 'px';
 }
 
+function toggleGutter() {
+    document.getElementById('line-gutter').classList.toggle('hidden');
+}
+
 function copyMarkdown() {
     const btn = document.getElementById('copy-md-btn');
     navigator.clipboard.writeText(rawMarkdown).then(function() {
@@ -552,6 +560,10 @@ document.addEventListener('keydown', function(e) {
                 gPressed = true;
                 gTimeout = setTimeout(function() { gPressed = false; }, 500);
             }
+            break;
+        case '\\':
+            toggleGutter();
+            e.preventDefault();
             break;
         case '/':
             openSearch();
