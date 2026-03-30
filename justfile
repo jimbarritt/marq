@@ -7,5 +7,5 @@ run-local *FLAGS:
     if echo "{{FLAGS}}" | grep -q -- "--debug"; then
         .build/debug/marq examples/test.md
     else
-        .build/debug/marq examples/test.md &
+        nohup .build/debug/marq examples/test.md &>/dev/null &
     fi
