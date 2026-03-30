@@ -92,7 +92,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "About Marq", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Marq", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        ProcessInfo.processInfo.setValue("Marq", forKey: "processName")
         let appMenuItem = NSMenuItem()
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
@@ -102,6 +101,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let openItem = NSMenuItem(title: "Open…", action: #selector(openFileDialog), keyEquivalent: "o")
         openItem.keyEquivalentModifierMask = .command
         fileMenu.addItem(openItem)
+        let closeItem = NSMenuItem(title: "Close", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "w")
+        closeItem.keyEquivalentModifierMask = .command
+        fileMenu.addItem(closeItem)
         let fileMenuItem = NSMenuItem()
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)

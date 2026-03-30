@@ -82,6 +82,64 @@ def quicksort(arr):
     return quicksort(left) + middle + quicksort(right)
 ```
 
+### Kotlin
+```kotlin
+fun <T : Comparable<T>> List<T>.mergeSort(): List<T> {
+    if (size <= 1) return this
+    val mid = size / 2
+    val left = subList(0, mid).mergeSort()
+    val right = subList(mid, size).mergeSort()
+    return merge(left, right)
+}
+
+private fun <T : Comparable<T>> merge(left: List<T>, right: List<T>): List<T> =
+    buildList {
+        var i = 0; var j = 0
+        while (i < left.size && j < right.size) {
+            if (left[i] <= right[j]) add(left[i++]) else add(right[j++])
+        }
+        addAll(left.subList(i, left.size))
+        addAll(right.subList(j, right.size))
+    }
+```
+
+### TypeScript
+```typescript
+interface Pipeline<T> {
+    pipe<U>(fn: (value: T) => U): Pipeline<U>;
+    value(): T;
+}
+
+function pipeline<T>(initial: T): Pipeline<T> {
+    return {
+        pipe: <U>(fn: (value: T) => U) => pipeline(fn(initial)),
+        value: () => initial,
+    };
+}
+
+const result = pipeline([3, 1, 4, 1, 5])
+    .pipe(arr => arr.filter(n => n > 2))
+    .pipe(arr => arr.map(n => n * 10))
+    .value(); // [30, 40, 50]
+```
+
+### Clojure
+```clojure
+(defn game-of-life [cells]
+  (let [neighbours (fn [[x y]]
+                     (for [dx [-1 0 1] dy [-1 0 1]
+                           :when (not= [dx dy] [0 0])]
+                       [(+ x dx) (+ y dy)]))
+        freq (frequencies (mapcat neighbours cells))]
+    (set (for [[cell n] freq
+               :when (or (= n 3) (and (= n 2) (cells cell)))]
+           cell))))
+
+(-> #{[1 0] [1 1] [1 2]}
+    game-of-life
+    game-of-life) ;; => #{[1 0] [1 1] [1 2]}
+```
+
 ### Shell
 ```bash
 #!/bin/bash
