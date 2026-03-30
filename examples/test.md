@@ -1,6 +1,6 @@
-# marq Test Document
+# ![Marq](../assets/logo.svg) Marq Test Document
 
-This is a test document for **marq**, a macOS markdown viewer.
+This is a test document for **Marq**, a macOS markdown viewer.
 
 ## Navigation
 
