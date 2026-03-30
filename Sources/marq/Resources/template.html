@@ -22,6 +22,7 @@
 
 <!-- Mermaid -->
 <script src="vendor/js/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: false, theme: 'default' });</script>
 
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -137,6 +138,64 @@
         border-color: #2da44e;
     }
 
+    /* Help overlay */
+    #help-overlay {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        z-index: 3000;
+        background: rgba(0,0,0,0.5);
+        justify-content: center;
+        align-items: center;
+    }
+    #help-overlay.active { display: flex; }
+    #help-panel {
+        background: #ffffff;
+        border: 1px solid #d0d7de;
+        border-radius: 12px;
+        padding: 24px 32px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        max-width: 480px;
+        width: 90%;
+    }
+    #help-panel h2 {
+        margin: 0 0 16px 0;
+        font-size: 16px;
+        color: #1f2328;
+        border-bottom: 1px solid #d0d7de;
+        padding-bottom: 8px;
+    }
+    #help-panel h3 {
+        margin: 12px 0 6px 0;
+        font-size: 13px;
+        color: #656d76;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .help-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 4px 0;
+        font-size: 14px;
+        color: #1f2328;
+    }
+    .help-key {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 12px;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        border-radius: 4px;
+        padding: 2px 6px;
+        color: #1f2328;
+    }
+    .help-hint {
+        font-size: 12px;
+        color: #8b949e;
+        text-align: center;
+        margin-top: 16px;
+    }
+
     /* Search overlay */
     #search-overlay {
         display: none;
@@ -189,6 +248,28 @@
 <body>
 
 <button id="copy-md-btn" onclick="copyMarkdown()">Copy Markdown</button>
+
+<div id="help-overlay" onclick="closeHelp()">
+    <div id="help-panel" onclick="event.stopPropagation()">
+        <h2>Keyboard Shortcuts</h2>
+        <h3>Navigation</h3>
+        <div class="help-row"><span>Scroll down / up</span><span class="help-key">j</span> <span class="help-key">k</span></div>
+        <div class="help-row"><span>Half page down / up</span><span class="help-key">Ctrl-d</span> <span class="help-key">Ctrl-u</span></div>
+        <div class="help-row"><span>Top / Bottom</span><span class="help-key">gg</span> <span class="help-key">G</span></div>
+        <div class="help-row"><span>Back / Forward</span><span class="help-key">Cmd-Left</span> <span class="help-key">Cmd-Right</span></div>
+        <h3>Search</h3>
+        <div class="help-row"><span>Search</span><span class="help-key">/</span></div>
+        <div class="help-row"><span>Next / Previous match</span><span class="help-key">n</span> <span class="help-key">N</span></div>
+        <div class="help-row"><span>Close search</span><span class="help-key">Esc</span></div>
+        <h3>Files</h3>
+        <div class="help-row"><span>Open file</span><span class="help-key">Space f o</span></div>
+        <div class="help-row"><span>Reload</span><span class="help-key">Cmd-r</span></div>
+        <h3>View</h3>
+        <div class="help-row"><span>Toggle line numbers</span><span class="help-key">\</span></div>
+        <div class="help-row"><span>Copy markdown</span><span>button top-right</span></div>
+        <div class="help-hint">Press ? or Esc to close</div>
+    </div>
+</div>
 
 <div id="search-overlay">
     <input type="text" id="search-input" placeholder="Search..." />
@@ -355,14 +436,18 @@ function renderMarkdown(md) {
 
     const content = document.getElementById('content');
     content.innerHTML = renderWithLineNumbers(md);
-    originalHTML = content.innerHTML;
 
-    // Render mermaid diagrams
-    if (typeof mermaid !== 'undefined') {
-        mermaid.initialize({ startOnLoad: false, theme: 'default' });
-        mermaid.run({ nodes: document.querySelectorAll('.mermaid') }).catch(function(e) {
+    // Render mermaid diagrams, then capture originalHTML after mermaid is done
+    const mermaidNodes = document.querySelectorAll('.mermaid');
+    if (typeof mermaid !== 'undefined' && mermaidNodes.length > 0) {
+        mermaid.run({ nodes: mermaidNodes }).then(function() {
+            originalHTML = content.innerHTML;
+        }).catch(function(e) {
             console.warn('Mermaid render error:', e);
+            originalHTML = content.innerHTML;
         });
+    } else {
+        originalHTML = content.innerHTML;
     }
 
     // Typeset math with KaTeX
@@ -449,6 +534,14 @@ function buildGutter() {
     gutter.style.height = totalHeight + 'px';
 }
 
+function toggleHelp() {
+    document.getElementById('help-overlay').classList.toggle('active');
+}
+
+function closeHelp() {
+    document.getElementById('help-overlay').classList.remove('active');
+}
+
 function toggleGutter() {
     document.getElementById('line-gutter').classList.toggle('hidden');
 }
@@ -484,6 +577,39 @@ window.addEventListener('resize', function() {
     }
 });
 
+// --- Leader key sequence ---
+let leaderActive = false;
+let leaderSequence = '';
+let leaderTimeout = null;
+
+function resetLeader() {
+    leaderActive = false;
+    leaderSequence = '';
+    clearTimeout(leaderTimeout);
+}
+
+function handleLeaderKey(key) {
+    leaderSequence += key;
+
+    // Reset after timeout
+    clearTimeout(leaderTimeout);
+    leaderTimeout = setTimeout(resetLeader, 1000);
+
+    // Match sequences
+    if (leaderSequence === 'fo') {
+        resetLeader();
+        window.webkit.messageHandlers.openFile.postMessage('');
+        return true;
+    }
+
+    // No possible match left — abort
+    if (!'fo'.startsWith(leaderSequence)) {
+        resetLeader();
+    }
+
+    return true;
+}
+
 // --- Vim-style navigation ---
 let gPressed = false;
 let gTimeout = null;
@@ -493,6 +619,15 @@ document.addEventListener('keydown', function(e) {
     const searchInput = document.getElementById('search-input');
     const isSearchActive = searchOverlay.classList.contains('active');
 
+    // Close help overlay on Escape or ?
+    if (document.getElementById('help-overlay').classList.contains('active')) {
+        if (e.key === 'Escape' || e.key === '?') {
+            closeHelp();
+            e.preventDefault();
+        }
+        return;
+    }
+
     // If search is active, handle search-specific keys
     if (isSearchActive) {
         if (e.key === 'Escape') {
@@ -501,11 +636,8 @@ document.addEventListener('keydown', function(e) {
             return;
         }
         if (e.key === 'Enter') {
-            if (e.shiftKey) {
-                prevMatch();
-            } else {
-                nextMatch();
-            }
+            // Confirm search and close overlay, keeping highlights
+            dismissSearch();
             e.preventDefault();
             return;
         }
@@ -514,6 +646,22 @@ document.addEventListener('keydown', function(e) {
 
     // Don't capture keys if typing in an input/textarea
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    // Leader key (space)
+    if (e.key === ' ' && !leaderActive && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        leaderActive = true;
+        leaderSequence = '';
+        clearTimeout(leaderTimeout);
+        leaderTimeout = setTimeout(resetLeader, 1000);
+        e.preventDefault();
+        return;
+    }
+
+    if (leaderActive) {
+        handleLeaderKey(e.key);
+        e.preventDefault();
+        return;
+    }
 
     const scrollAmount = 60;
     const halfPage = window.innerHeight / 2;
@@ -561,6 +709,10 @@ document.addEventListener('keydown', function(e) {
                 gTimeout = setTimeout(function() { gPressed = false; }, 500);
             }
             break;
+        case '?':
+            toggleHelp();
+            e.preventDefault();
+            break;
         case '\\':
             toggleGutter();
             e.preventDefault();
@@ -600,7 +752,13 @@ function openSearch() {
     input.addEventListener('input', onSearchInput);
 }
 
+function dismissSearch() {
+    // Close overlay but keep highlights — Enter confirms search
+    document.getElementById('search-overlay').classList.remove('active');
+}
+
 function closeSearch() {
+    // Escape — close overlay and clear highlights
     const overlay = document.getElementById('search-overlay');
     overlay.classList.remove('active');
     clearSearch();

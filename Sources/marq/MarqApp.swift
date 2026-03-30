@@ -1,6 +1,15 @@
 import AppKit
 import WebKit
 
+class SilentWebView: WKWebView {
+    override func keyDown(with event: NSEvent) {
+        // Try performKeyEquivalent first (dispatches to JS), fall back silently
+        if !performKeyEquivalent(with: event) {
+            // Don't call super.keyDown — that triggers NSBeep
+        }
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var webView: WKWebView!
@@ -36,10 +45,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let config = WKWebViewConfiguration()
         let contentController = WKUserContentController()
         contentController.add(self, name: "navigate")
+        contentController.add(self, name: "openFile")
         config.userContentController = contentController
 
         log("Creating WKWebView")
-        webView = WKWebView(frame: .zero, configuration: config)
+        webView = SilentWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
 
         log("Creating window")
@@ -84,6 +94,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenuItem = NSMenuItem()
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
+
+        // File menu
+        let fileMenu = NSMenu(title: "File")
+        let openItem = NSMenuItem(title: "Open…", action: #selector(openFileDialog), keyEquivalent: "o")
+        openItem.keyEquivalentModifierMask = .command
+        fileMenu.addItem(openItem)
+        let fileMenuItem = NSMenuItem()
+        fileMenuItem.submenu = fileMenu
+        mainMenu.addItem(fileMenuItem)
 
         // Navigate menu with back/forward (Cmd+Left / Cmd+Right)
         let navMenu = NSMenu(title: "Navigate")
@@ -158,6 +177,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func reloadFile() {
         loadAndInject()
+    }
+
+    @objc func openFileDialog() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "md")!, .init(filenameExtension: "markdown")!]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.navigateTo(url.path)
+        }
     }
 
     @objc func navigateForward() {
@@ -246,6 +276,10 @@ extension AppDelegate: WKNavigationDelegate {
 
 extension AppDelegate: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "openFile" {
+            openFileDialog()
+            return
+        }
         guard message.name == "navigate", let href = message.body as? String else { return }
         log("Navigate request: \(href)")
 
