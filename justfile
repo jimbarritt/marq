@@ -1,6 +1,6 @@
 # marq - macOS markdown viewer
 
-version := "1.0.0"
+version := "1.1.0"
 app_name := "Marq"
 bundle_id := "com.jimbarritt.marq"
 

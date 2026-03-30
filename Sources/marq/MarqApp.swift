@@ -322,17 +322,8 @@ extension AppDelegate: WKScriptMessageHandler {
         log("Navigate request: \(href)")
 
         let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
-        log("Nav trimmed='\(trimmed)' bytes=\(Array(trimmed.utf8))")
-        if trimmed == "back" {
-            log("Going back: historyIndex=\(historyIndex) history=\(history.count)")
-            navigateBack()
-            return
-        }
-        if trimmed == "forward" {
-            log("Going forward: historyIndex=\(historyIndex) history=\(history.count)")
-            navigateForward()
-            return
-        }
+        if trimmed == "back" { navigateBack(); return }
+        if trimmed == "forward" { navigateForward(); return }
 
         // Resolve relative path against current file's directory
         let baseDir = URL(fileURLWithPath: filePath).deletingLastPathComponent()
