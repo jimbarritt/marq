@@ -790,8 +790,20 @@ function performSearch(query) {
 
     if (!query) return;
 
-    // Use TreeWalker to find text nodes
-    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, null, false);
+    // Use TreeWalker to find text nodes, skipping SVG/script/style elements
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
+        acceptNode: function(node) {
+            let el = node.parentElement;
+            while (el && el !== content) {
+                const tag = el.tagName.toLowerCase();
+                if (tag === 'svg' || tag === 'script' || tag === 'style') {
+                    return NodeFilter.FILTER_REJECT;
+                }
+                el = el.parentElement;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        }
+    }, false);
     const textNodes = [];
     while (walker.nextNode()) {
         textNodes.push(walker.currentNode);

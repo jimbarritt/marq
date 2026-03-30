@@ -83,14 +83,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "\(fileName) — marq"
         window.contentView = webView
         window.makeKeyAndOrderFront(nil)
+        // Focus not working reliably without ignoringOtherApps — removed
 
         // Build menu bar
         let mainMenu = NSMenu()
 
-        let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About marq", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let appMenu = NSMenu(title: "Marq")
+        appMenu.addItem(withTitle: "About Marq", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit marq", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Marq", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        ProcessInfo.processInfo.setValue("Marq", forKey: "processName")
         let appMenuItem = NSMenuItem()
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
