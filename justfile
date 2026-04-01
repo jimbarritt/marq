@@ -1,8 +1,18 @@
 # marq - macOS markdown viewer
 
-version := "1.1.0"
+version := "1.1.1"
 app_name := "Marq"
 bundle_id := "com.jimbarritt.marq"
+
+# Show the current version
+version:
+    @echo "{{version}}"
+
+# Bump the version in justfile and Info.plist
+bump VERSION:
+    sed -i '' 's/^version := ".*"/version := "{{VERSION}}"/' justfile
+    sed -i '' 's/<string>{{version}}<\/string>/<string>{{VERSION}}<\/string>/g' Sources/marq/Info.plist
+    @echo "Version bumped to {{VERSION}}"
 
 # Build and run marq with test doc. Pass --debug to run in foreground with logs.
 run-local *FLAGS:
@@ -63,6 +73,50 @@ _build-icon:
 
     iconutil -c icns "$ICONSET" -o build/AppIcon.icns
     echo "Built build/AppIcon.icns"
+
+# Build and zip for distribution (unsigned)
+package: bundle _zip
+    @echo "Ready: build/{{app_name}}.zip"
+    @shasum -a 256 "build/{{app_name}}.zip"
+
+# Build, release to GitHub, and update homebrew cask
+publish: package
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERSION="{{version}}"
+    ZIP="build/{{app_name}}.zip"
+    TAP="/tmp/homebrew-tap"
+    CASK="$TAP/Casks/marq.rb"
+
+    # Create GitHub release and upload zip
+    gh release create "v$VERSION" "$ZIP" \
+        --title "Marq v$VERSION" \
+        --notes "See README for install instructions." \
+        --repo jimbarritt/marq
+
+    # Compute SHA256
+    SHA=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)
+    echo "SHA256: $SHA"
+
+    # Update homebrew tap
+    if [ ! -d "$TAP" ]; then
+        git clone git@github.com:jimbarritt/homebrew-tap.git "$TAP"
+    else
+        cd "$TAP" && git pull && cd -
+    fi
+
+    # Update version and sha256 in cask
+    sed -i '' "s/version \".*\"/version \"$VERSION\"/" "$CASK"
+    sed -i '' "s/sha256 \".*\"/sha256 \"$SHA\"/" "$CASK"
+
+    # Commit cask update
+    cd "$TAP"
+    git add Casks/marq.rb
+    git commit -m "marq v$VERSION"
+
+    echo ""
+    echo "Done. Now push the tap:"
+    echo "  cd $TAP && git push"
 
 # Sign the .app with Developer ID
 sign IDENTITY: bundle

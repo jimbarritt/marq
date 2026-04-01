@@ -65,6 +65,40 @@ just bundle        # builds build/Marq.app
 just run-app       # builds and opens with test doc
 ```
 
+## Publishing a release
+
+1. Check the current version:
+   ```bash
+   just version
+   ```
+
+2. Bump to the new version:
+   ```bash
+   just bump 1.2.0
+   ```
+
+3. Commit the version bump:
+   ```bash
+   git add justfile Sources/marq/Info.plist
+   git commit -m "Bump to v1.2.0"
+   git push
+   ```
+
+4. Build, publish to GitHub, and update the Homebrew cask:
+   ```bash
+   just publish
+   ```
+
+5. Push the cask update (must be done manually):
+   ```bash
+   cd /tmp/homebrew-tap && git push
+   ```
+
+Users can then upgrade with:
+```bash
+brew upgrade --cask marq
+```
+
 ## Keyboard Shortcuts
 
 | Key | Action |
