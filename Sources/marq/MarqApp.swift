@@ -142,7 +142,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Load template via file URL with read access to entire filesystem.
         // loadFileURL does allow remote (https) resources — the earlier image issue
         // was unrelated to this choice.
-        if let templateURL = Bundle.module.url(forResource: "template", withExtension: "html", subdirectory: "Resources") {
+        //
+        // Bundle.module (SPM-generated) looks at Bundle.main.bundleURL/marq_marq.bundle
+        // which resolves to Marq.app/marq_marq.bundle — wrong. The bundle lives in
+        // Marq.app/Contents/Resources/ so we find it via resourceURL instead.
+        if let templateURL = findTemplateURL() {
             log("Loading template from: \(templateURL.path)")
             webView.loadFileURL(templateURL, allowingReadAccessTo: URL(fileURLWithPath: "/"))
         } else {
@@ -225,6 +229,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "\(fileName) — marq"
         loadAndInject()
         startWatching()
+    }
+
+    func findTemplateURL() -> URL? {
+        let candidates: [URL?] = [
+            // Installed .app: Marq.app/Contents/Resources/marq_marq.bundle
+            Bundle.main.resourceURL?.appendingPathComponent("marq_marq.bundle"),
+            // Development: binary sits next to the bundle in .build/
+            URL(fileURLWithPath: CommandLine.arguments[0])
+                .deletingLastPathComponent()
+                .appendingPathComponent("marq_marq.bundle"),
+        ]
+        for case let bundleURL? in candidates {
+            if let bundle = Bundle(url: bundleURL),
+               let url = bundle.url(forResource: "template", withExtension: "html", subdirectory: "Resources") {
+                return url
+            }
+        }
+        return nil
     }
 
     func startWatching() {
