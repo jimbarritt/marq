@@ -23,6 +23,22 @@ Then open any markdown file with:
 open -a Marq path/to/file.md
 ```
 
+### Set as default markdown handler
+
+To open `.md` files with Marq by default (e.g. double-clicking in Finder):
+
+```bash
+brew install duti
+duti -s com.jimbarritt.marq .md all
+duti -s com.jimbarritt.marq .markdown all
+```
+
+If Marq doesn't register immediately, force Launch Services to re-index it first:
+
+```bash
+/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f /Applications/Marq.app
+```
+
 ## Features
 
 - GitHub-style markdown rendering (light theme)
