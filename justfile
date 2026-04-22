@@ -145,6 +145,15 @@ release IDENTITY APPLE_ID TEAM_ID: (sign IDENTITY) (notarize APPLE_ID TEAM_ID)
 run-app: bundle
     open "build/{{app_name}}.app" --args "$(pwd)/examples/test.md"
 
+# Build and install to /Applications
+install-local: bundle
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pkill -x "{{app_name}}" 2>/dev/null || true
+    rm -rf "/Applications/{{app_name}}.app"
+    cp -r "build/{{app_name}}.app" "/Applications/{{app_name}}.app"
+    echo "Installed to /Applications/{{app_name}}.app"
+
 # Clean build artifacts
 clean:
     #!/usr/bin/env bash

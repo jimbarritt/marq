@@ -38,7 +38,6 @@
     #page-wrapper {
         display: flex;
         max-width: 1060px;
-        margin: 0 auto;
     }
 
     #line-gutter {
@@ -445,12 +444,16 @@ function renderWithLineNumbers(src) {
     return parts.join('');
 }
 
-function renderMarkdown(md) {
+function renderMarkdown(md, resetScroll) {
     rawMarkdown = md;
     clearSearch();
 
     const content = document.getElementById('content');
     content.innerHTML = renderWithLineNumbers(md);
+
+    if (resetScroll) {
+        window.scrollTo(0, 0);
+    }
 
     // Render mermaid diagrams, then capture originalHTML after mermaid is done
     const mermaidNodes = document.querySelectorAll('.mermaid');
@@ -489,15 +492,15 @@ function renderMarkdown(md) {
         images.forEach(function(img) {
             if (img.complete) {
                 loaded++;
-                if (loaded === total) buildGutter();
+                if (loaded === total) { buildGutter(); if (resetScroll) window.scrollTo(0, 0); }
             } else {
                 img.addEventListener('load', function() {
                     loaded++;
-                    if (loaded === total) buildGutter();
+                    if (loaded === total) { buildGutter(); if (resetScroll) window.scrollTo(0, 0); }
                 });
                 img.addEventListener('error', function() {
                     loaded++;
-                    if (loaded === total) buildGutter();
+                    if (loaded === total) { buildGutter(); if (resetScroll) window.scrollTo(0, 0); }
                 });
             }
         });

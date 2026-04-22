@@ -19,6 +19,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var history: [String] = []
     var historyIndex: Int = -1
     var pendingOpenFile: String?
+    var statusLabel: NSTextField!
+    var statusBar: NSView!
+    var resetScrollOnNextInject: Bool = false
 
     func log(_ msg: String) {
         let ts = ISO8601DateFormatter().string(from: Date())
@@ -83,7 +86,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let fileName = filePath.isEmpty ? "marq" : URL(fileURLWithPath: filePath).lastPathComponent
         window.title = "\(fileName) — marq"
-        window.contentView = webView
+
+        // Build content view: webView stacked above a status bar
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight))
+        containerView.autoresizingMask = [.width, .height]
+
+        let statusBarHeight: CGFloat = 22
+
+        // Status bar
+        statusBar = NSView(frame: NSRect(x: 0, y: 0, width: windowWidth, height: statusBarHeight))
+        statusBar.autoresizingMask = [.width]
+        statusBar.wantsLayer = true
+        let statusLayer = CALayer()
+        statusLayer.backgroundColor = NSColor(red: 0.98, green: 0.98, blue: 0.98, alpha: 1.0).cgColor
+        statusBar.layer = statusLayer
+
+        // Top separator line
+        let separator = NSBox(frame: NSRect(x: 0, y: statusBarHeight - 1, width: windowWidth, height: 1))
+        separator.autoresizingMask = [.width]
+        separator.boxType = .separator
+        statusBar.addSubview(separator)
+
+        // Filename label
+        statusLabel = NSTextField(frame: NSRect(x: 8, y: 3, width: windowWidth - 16, height: 16))
+        statusLabel.autoresizingMask = [.width]
+        statusLabel.isEditable = false
+        statusLabel.isSelectable = false
+        statusLabel.isBordered = false
+        statusLabel.drawsBackground = false
+        statusLabel.font = NSFont.systemFont(ofSize: 11)
+        statusLabel.textColor = NSColor.darkGray
+        statusLabel.stringValue = filePath.isEmpty ? "" : filePath
+        statusBar.addSubview(statusLabel)
+
+        statusBar.frame = NSRect(x: 0, y: 0, width: windowWidth, height: statusBarHeight)
+        containerView.addSubview(statusBar)
+
+        // WebView sits above the status bar
+        webView.frame = NSRect(x: 0, y: statusBarHeight, width: windowWidth, height: windowHeight - statusBarHeight)
+        webView.autoresizingMask = [.width, .height]
+        containerView.addSubview(webView)
+
+        window.contentView = containerView
+        // Set layer background after view is in hierarchy so layer is guaranteed non-nil
+        statusBar.layer?.backgroundColor = NSColor(red: 0.98, green: 0.98, blue: 0.98, alpha: 1.0).cgColor
         window.makeKeyAndOrderFront(nil)
         // Focus not working reliably without ignoringOtherApps — removed
 
@@ -110,12 +156,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
-        // Edit menu (enables Cmd+C/V/X/A in WKWebView)
+        // Edit menu — read-only viewer, stripped to copy/select only.
+        // NSMenuDelegate removes any items macOS injects (e.g. Writing Tools on Sequoia).
         let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.delegate = self
         let editMenuItem = NSMenuItem()
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
@@ -135,6 +181,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let navMenuItem = NSMenuItem()
         navMenuItem.submenu = navMenu
         mainMenu.addItem(navMenuItem)
+
+        // Window menu
+        let windowMenu = NSMenu(title: "Window")
+        let minimizeItem = NSMenuItem(title: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
+        minimizeItem.keyEquivalentModifierMask = .command
+        windowMenu.addItem(minimizeItem)
+        let zoomItem = NSMenuItem(title: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(zoomItem)
+        windowMenu.addItem(.separator())
+        let fullScreenItem = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullScreenItem.keyEquivalentModifierMask = [.control, .command]
+        windowMenu.addItem(fullScreenItem)
+        windowMenu.addItem(.separator())
+        let bringAllItem = NSMenuItem(title: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowMenu.addItem(bringAllItem)
+        let windowMenuItem = NSMenuItem()
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
         log("Menu bar configured, loading template...")
@@ -166,10 +231,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             historyIndex = 0
             let fileName = URL(fileURLWithPath: filePath).lastPathComponent
             window.title = "\(fileName) — Marq"
+            updateStatusBar(path: filePath)
+            resetScrollOnNextInject = true
         }
 
         // Start file watcher
         startWatching()
+    }
+
+    func updateStatusBar(path: String) {
+        statusLabel?.stringValue = path
     }
 
     func navigateTo(_ path: String, addToHistory: Bool = true) {
@@ -187,7 +258,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         window.title = "\(fileName) — marq"
+        updateStatusBar(path: path)
 
+        resetScrollOnNextInject = true
         loadAndInject()
         startWatching()
     }
@@ -200,6 +273,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         filePath = path
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         window.title = "\(fileName) — marq"
+        updateStatusBar(path: path)
+        resetScrollOnNextInject = true
         loadAndInject()
         startWatching()
     }
@@ -227,6 +302,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         filePath = path
         let fileName = URL(fileURLWithPath: path).lastPathComponent
         window.title = "\(fileName) — marq"
+        updateStatusBar(path: path)
+        resetScrollOnNextInject = true
         loadAndInject()
         startWatching()
     }
@@ -291,7 +368,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "`", with: "\\`")
             .replacingOccurrences(of: "$", with: "\\$")
-        let js = "renderMarkdown(`\(escaped)`);"
+        let shouldReset = resetScrollOnNextInject
+        resetScrollOnNextInject = false
+        let js = "renderMarkdown(`\(escaped)`, \(shouldReset ? "true" : "false"));"
         webView.evaluateJavaScript(js) { [weak self] _, error in
             if let error = error {
                 self?.log("JS ERROR: \(error)")
@@ -359,5 +438,16 @@ extension AppDelegate: WKScriptMessageHandler {
         }
 
         navigateTo(resolved)
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        let allowed = ["Copy", "Select All"]
+        for item in menu.items.reversed() {
+            if !allowed.contains(item.title) {
+                menu.removeItem(item)
+            }
+        }
     }
 }
