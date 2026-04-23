@@ -56,6 +56,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         log("Creating WKWebView")
         webView = SilentWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
+        if #available(macOS 13.3, *) {
+            webView.isInspectable = true
+        }
 
         log("Creating window")
         // Create window

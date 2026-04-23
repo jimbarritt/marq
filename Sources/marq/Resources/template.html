@@ -79,6 +79,7 @@
         min-width: 0;
         max-width: 980px;
         padding: 0;
+        align-self: flex-start;
     }
 
     /* Top-right toolbar */
@@ -474,28 +475,23 @@ function renderMarkdown(md, resetScroll) {
         });
     }
 
-    // Build line number gutter — defer slightly so layout settles,
-    // then rebuild again after all images load
+    // Initial gutter build; ResizeObserver below handles all subsequent rebuilds
+    // (font load, async highlight, image load, window resize, etc.)
     requestAnimationFrame(function() { buildGutter(); });
 
+    // Reset scroll again once images finish loading (they shift content).
+    // Gutter rebuild is handled by ResizeObserver.
     const images = content.querySelectorAll('img');
     let loaded = 0;
     const total = images.length;
-    if (total > 0) {
+    if (total > 0 && resetScroll) {
         images.forEach(function(img) {
-            if (img.complete) {
+            const onDone = function() {
                 loaded++;
-                if (loaded === total) { buildGutter(); if (resetScroll) window.scrollTo(0, 0); }
-            } else {
-                img.addEventListener('load', function() {
-                    loaded++;
-                    if (loaded === total) { buildGutter(); if (resetScroll) window.scrollTo(0, 0); }
-                });
-                img.addEventListener('error', function() {
-                    loaded++;
-                    if (loaded === total) { buildGutter(); if (resetScroll) window.scrollTo(0, 0); }
-                });
-            }
+                if (loaded === total) window.scrollTo(0, 0);
+            };
+            if (img.complete) onDone();
+            else { img.addEventListener('load', onDone); img.addEventListener('error', onDone); }
         });
     }
 }
@@ -589,12 +585,20 @@ function copyCode(btn) {
     });
 }
 
-// Reposition gutter line numbers on resize (wrapping changes positions)
-window.addEventListener('resize', function() {
-    if (document.querySelectorAll('[data-source-line]').length > 0) {
+// Rebuild the gutter whenever #content's geometry changes for any reason:
+// initial layout settling, font loads, async syntax highlighting / mermaid /
+// katex, image loads, window resize. Replaces the old `resize` listener.
+// Safe from re-entrant feedback because `.markdown-body` has
+// `align-self: flex-start`, so changing `gutter.style.height` does not
+// resize content.
+const gutterResizeObserver = new ResizeObserver(function() {
+    const content = document.getElementById('content');
+    if (!content) return;
+    if (content.querySelector(':scope > [data-source-line]')) {
         buildGutter();
     }
 });
+gutterResizeObserver.observe(document.getElementById('content'));
 
 // --- Leader key sequence ---
 let leaderActive = false;
