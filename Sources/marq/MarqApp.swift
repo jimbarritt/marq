@@ -152,6 +152,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let openItem = NSMenuItem(title: "Open…", action: #selector(openFileDialog), keyEquivalent: "o")
         openItem.keyEquivalentModifierMask = .command
         fileMenu.addItem(openItem)
+        let exportItem = NSMenuItem(title: "Export as PDF…", action: #selector(exportPDF), keyEquivalent: "e")
+        exportItem.keyEquivalentModifierMask = .command
+        fileMenu.addItem(exportItem)
         let closeItem = NSMenuItem(title: "Close", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "w")
         closeItem.keyEquivalentModifierMask = .command
         fileMenu.addItem(closeItem)
@@ -309,6 +312,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         resetScrollOnNextInject = true
         loadAndInject()
         startWatching()
+    }
+
+    @objc func exportPDF() {
+        guard !filePath.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "No file open"
+            alert.informativeText = "Open a markdown file before exporting to PDF."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let panel = NSSavePanel()
+        let defaultName = URL(fileURLWithPath: filePath).deletingPathExtension().lastPathComponent
+        panel.nameFieldStringValue = defaultName + ".pdf"
+        panel.allowedContentTypes = [.pdf]
+
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.generatePDF(to: url)
+        }
+    }
+
+    func generatePDF(to url: URL) {
+        let hideToolbarJS = """
+        document.querySelector('.toolbar').style.display = 'none';
+        document.querySelectorAll('.code-copy-btn').forEach(btn => btn.style.display = 'none');
+        """
+        let showToolbarJS = """
+        document.querySelector('.toolbar').style.display = '';
+        document.querySelectorAll('.code-copy-btn').forEach(btn => btn.style.display = '');
+        """
+
+        webView.evaluateJavaScript(hideToolbarJS) { [weak self] _, error in
+            if let error = error {
+                self?.log("Error hiding toolbar: \(error)")
+                return
+            }
+
+            let config = WKPDFConfiguration()
+            self?.webView.createPDF(configuration: config) { result in
+                // Restore toolbar visibility
+                self?.webView.evaluateJavaScript(showToolbarJS, completionHandler: nil)
+
+                switch result {
+                case .success(let data):
+                    do {
+                        try data.write(to: url)
+                        self?.log("PDF exported successfully to: \(url.path)")
+                    } catch {
+                        self?.log("ERROR writing PDF: \(error)")
+                        let alert = NSAlert()
+                        alert.messageText = "Export failed"
+                        alert.informativeText = error.localizedDescription
+                        alert.addButton(withTitle: "OK")
+                        alert.runModal()
+                    }
+                case .failure(let error):
+                    self?.log("ERROR generating PDF: \(error)")
+                    let alert = NSAlert()
+                    alert.messageText = "Export failed"
+                    alert.informativeText = error.localizedDescription
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
+            }
+        }
     }
 
     func findTemplateURL() -> URL? {
