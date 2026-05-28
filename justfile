@@ -1,6 +1,6 @@
 # marq - macOS markdown viewer
 
-version := "1.2.2"
+version := "1.2.5"
 app_name := "Marq"
 bundle_id := "com.jimbarritt.marq"
 
@@ -115,8 +115,14 @@ publish: package
     git commit -m "marq v$VERSION"
 
     echo ""
-    echo "Done. Now push the tap:"
-    echo "  cd $TAP && git push"
+    echo "=================================================================="
+    echo "  GitHub release v$VERSION is live, tap committed locally."
+    echo "  The cask is NOT published until the tap is pushed."
+    echo "=================================================================="
+    read -n1 -s -r -p "  Press SPACE to push the tap now (Ctrl-C to skip)... "
+    echo ""
+    git push
+    echo "Tap pushed — cask v$VERSION is live."
 
 # Sign the .app with Developer ID
 sign IDENTITY: bundle

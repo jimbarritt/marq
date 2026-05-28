@@ -370,6 +370,15 @@ renderer.code = function(code) {
         '</div>';
 };
 
+renderer.heading = function(text, level) {
+    const slug = text.toLowerCase().trim()
+        .replace(/<[^>]*>/g, '')
+        .replace(/&[#a-z0-9]+;/g, '')
+        .replace(/[^\w\s-]/g, '')
+        .replace(/\s/g, '-');
+    return '<h' + level + ' id="' + slug + '">' + text + '</h' + level + '>';
+};
+
 marked.setOptions({ renderer: renderer });
 
 // Use walkTokens to stamp source line numbers onto top-level block tokens
