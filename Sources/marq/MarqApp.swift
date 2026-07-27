@@ -25,6 +25,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusBar: NSView!
     var resetScrollOnNextInject: Bool = false
 
+    // Text zoom. `pageZoom` scales the whole document — prose, gutter, search
+    // box — which is what a reader means by zoom, and it leaves the native
+    // status bar alone because that is an AppKit view outside the web view.
+    // Fixed steps rather than a multiplier so Cmd-- after Cmd-+ lands back on
+    // 100% exactly, and so the sequence matches Safari's.
+    static let zoomSteps: [CGFloat] = [0.5, 0.67, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+    static let defaultZoomIndex = 4   // 1.0
+    static let zoomDefaultsKey = "textZoom"
+    var zoomIndex: Int = AppDelegate.defaultZoomIndex
+
     func log(_ msg: String) {
         let ts = ISO8601DateFormatter().string(from: Date())
         let line = "[marq \(ts)] \(msg)\n"
@@ -64,6 +74,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if #available(macOS 13.3, *) {
             webView.isInspectable = true
         }
+
+        // Restore the saved zoom level before the first load, so the document
+        // is laid out at the right size rather than reflowing after it appears.
+        // Set directly rather than via applyZoom() — the template's JS does not
+        // exist yet, and it runs layoutTables() itself once it does.
+        // `integer(forKey:)` rather than `object(forKey:) as? Int`: a value passed
+        // on the command line as `-textZoom 8` lands in the argument domain as a
+        // string, and the cast would silently drop it. The nil check keeps an
+        // absent key from reading as index 0.
+        if UserDefaults.standard.object(forKey: AppDelegate.zoomDefaultsKey) != nil {
+            let saved = UserDefaults.standard.integer(forKey: AppDelegate.zoomDefaultsKey)
+            zoomIndex = min(max(saved, 0), AppDelegate.zoomSteps.count - 1)
+        }
+        webView.pageZoom = AppDelegate.zoomSteps[zoomIndex]
 
         log("Creating window")
         // Create window
@@ -176,6 +200,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let editMenuItem = NSMenuItem()
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
+
+        // View menu — text zoom
+        let viewMenu = NSMenu(title: "View")
+        let zoomInItem = NSMenuItem(title: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
+        zoomInItem.keyEquivalentModifierMask = .command
+        viewMenu.addItem(zoomInItem)
+        let zoomOutItem = NSMenuItem(title: "Zoom Out", action: #selector(zoomOut), keyEquivalent: "-")
+        zoomOutItem.keyEquivalentModifierMask = .command
+        viewMenu.addItem(zoomOutItem)
+        let zoomResetItem = NSMenuItem(title: "Actual Size", action: #selector(zoomReset), keyEquivalent: "0")
+        zoomResetItem.keyEquivalentModifierMask = .command
+        viewMenu.addItem(zoomResetItem)
+        let viewMenuItem = NSMenuItem()
+        viewMenuItem.submenu = viewMenu
+        mainMenu.addItem(viewMenuItem)
+
+        // Cmd-+ is really Cmd-Shift-= on most layouts, which the menu item above
+        // catches and displays correctly. A bare Cmd-= is what people actually
+        // press, and it cannot be a second menu item: a visible duplicate is
+        // clutter and a hidden one never fires, because key equivalent matching
+        // skips hidden items.
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "=" else { return event }
+            self.zoomIn()
+            return nil
+        }
 
         // Navigate menu with back/forward (Cmd+Left / Cmd+Right)
         let navMenu = NSMenu(title: "Navigate")
@@ -294,6 +346,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         loadAndInject()
     }
 
+    // MARK: - Zoom
+
+    @objc func zoomIn() {
+        setZoomIndex(zoomIndex + 1)
+    }
+
+    @objc func zoomOut() {
+        setZoomIndex(zoomIndex - 1)
+    }
+
+    @objc func zoomReset() {
+        setZoomIndex(AppDelegate.defaultZoomIndex)
+    }
+
+    func setZoomIndex(_ index: Int) {
+        let clamped = min(max(index, 0), AppDelegate.zoomSteps.count - 1)
+        guard clamped != zoomIndex else { return }
+        zoomIndex = clamped
+        UserDefaults.standard.set(zoomIndex, forKey: AppDelegate.zoomDefaultsKey)
+        applyZoom()
+    }
+
+    func applyZoom() {
+        let zoom = AppDelegate.zoomSteps[zoomIndex]
+        log("Zoom set to \(Int(zoom * 100))%")
+        webView.pageZoom = zoom
+        // Zooming changes the CSS viewport, so the column widths layoutTables()
+        // computed against the old one are stale. The template's resize listener
+        // does fire, but it is debounced by 100ms and the tables visibly jump in
+        // the meantime — re-running here settles them in the same frame.
+        webView.evaluateJavaScript("layoutTables(); buildGutter();", completionHandler: nil)
+    }
+
     @objc func openFileDialog() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.init(filenameExtension: "md")!, .init(filenameExtension: "markdown")!]
@@ -348,6 +433,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // dialog uses, so the document breaks across pages and honours the @page and
     // break-inside rules in template.html.
     func generatePDF(to url: URL) {
+        // Defensive: measured, printOperation(with:) ignores pageZoom entirely —
+        // exporting at 175% produces a PDF identical to one at 100%, down to the
+        // glyph bounds. Pinned to 1.0 anyway so a WebKit that starts honouring it
+        // cannot silently scale every export by whatever the reader last zoomed to.
+        webView.pageZoom = 1.0
+
         let info = NSPrintInfo()
         info.jobDisposition = .save
         info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url as NSURL
@@ -395,6 +486,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func restoreAfterPrint() {
+        webView.pageZoom = AppDelegate.zoomSteps[zoomIndex]
         webView.evaluateJavaScript("restoreTableLayoutAfterPrint();", completionHandler: nil)
     }
 
