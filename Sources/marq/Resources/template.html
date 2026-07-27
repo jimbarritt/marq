@@ -102,18 +102,11 @@
     }
 
     /* Tables break out of the 980px prose measure and use the full window
-       width. markdown-body starts at 32px body padding + 48px gutter + 16px
-       gutter margin = 96px, leaving 32px of padding on the right. */
+       width. The width itself is set by layoutTables() rather than in CSS —
+       see availableTableWidth(). */
     .table-wrapper {
-        width: calc(100vw - 128px);
-        max-width: calc(100vw - 128px);
         overflow-x: auto;
         margin-bottom: 16px;
-    }
-
-    #line-gutter.hidden ~ .markdown-body .table-wrapper {
-        width: calc(100vw - 64px);
-        max-width: calc(100vw - 64px);
     }
 
     .table-wrapper > table {
@@ -284,6 +277,90 @@
     .mermaid {
         text-align: center;
         margin: 16px 0;
+    }
+
+    /* --- Print / PDF export -------------------------------------------- */
+    @media print {
+        /* Margins come from NSPrintInfo; padding here would double them. */
+        body {
+            padding: 0;
+            background: #ffffff;
+        }
+
+        /* Screen-only chrome. */
+        .toolbar,
+        #line-gutter,
+        #help-overlay,
+        #search-overlay,
+        .code-copy-btn {
+            display: none !important;
+        }
+
+        #page-wrapper {
+            display: block;
+            max-width: none;
+        }
+
+        .markdown-body {
+            max-width: none;
+        }
+
+        /* layoutTables() sizes tables in pixels against the *window*, which is
+           meaningless on paper and overflows it. Hand the columns back to the
+           browser for print. These need !important to beat the inline styles
+           and the generated <col> widths. */
+        .table-wrapper {
+            width: auto !important;
+            max-width: 100% !important;
+            overflow-x: visible !important;
+        }
+
+        .markdown-body table {
+            width: 100% !important;
+            table-layout: auto !important;
+        }
+
+        .marq-cols col {
+            width: auto !important;
+        }
+
+        /* On screen a long code line scrolls sideways; on paper it would just
+           be cut off, so wrap it instead. */
+        pre,
+        pre > code {
+            white-space: pre-wrap !important;
+            word-break: break-word;
+            overflow: visible !important;
+        }
+
+        .mermaid svg,
+        .markdown-body img {
+            max-width: 100% !important;
+            height: auto;
+        }
+
+        /* Keep blocks whole across page breaks where we can. */
+        pre,
+        blockquote,
+        tr,
+        img,
+        .mermaid {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+
+        thead {
+            display: table-header-group;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            break-after: avoid;
+            page-break-after: avoid;
+        }
+
+        a {
+            text-decoration: none;
+        }
     }
 </style>
 </head>
@@ -552,27 +629,72 @@ function maxMinFairWidths(max, min, avail) {
     return widths;
 }
 
+// How wide a table may be: from the left edge of the content column to the
+// window's right padding.
+//
+// Deliberately not `calc(100vw - <constant>)`. That has to hard-code the gutter
+// geometry, so it silently goes wrong when the gutter is toggled, and `100vw`
+// includes the vertical scrollbar whereas documentElement.clientWidth does not
+// — which is what pushed tables a little past the window edge. Measuring the
+// content column directly gets both right. rect.left is viewport-relative, so
+// scrollX is added back to keep the result stable when the page is scrolled
+// horizontally; without it a scrolled page would widen the table further and
+// feed back on itself.
+function availableTableWidth() {
+    const content = document.getElementById('content');
+    const left = content.getBoundingClientRect().left + window.scrollX;
+    const padRight = parseFloat(getComputedStyle(document.body).paddingRight) || 0;
+    return Math.max(0, Math.floor(document.documentElement.clientWidth - left - padRight));
+}
+
+function allocateColumns(max, min, budget) {
+    const natural = max.reduce(function(a, b) { return a + b; }, 0);
+    if (natural <= budget) {
+        // Nothing needs to wrap — widen every column proportionally so the
+        // table still fills the window.
+        return max.map(function(w) { return w + (budget - natural) * (w / natural); });
+    }
+    return maxMinFairWidths(max, min(), budget);
+}
+
 function sizeTableColumns(table, wrapper) {
     const head = table.rows[0];
     if (!head) return;
     const n = head.cells.length;
-    const avail = wrapper.clientWidth;
+    const avail = availableTableWidth();
     if (!avail) return;
+    wrapper.style.width = avail + 'px';
 
     const max = measureColumns(table, 'max-content');
     if (max.length !== n) return;
-    const natural = max.reduce(function(a, b) { return a + b; }, 0);
-    if (!natural) return;
+    if (!max.reduce(function(a, b) { return a + b; }, 0)) return;
 
-    let widths;
-    if (natural <= avail) {
-        // Nothing needs to wrap — widen every column proportionally so the
-        // table still fills the window.
-        widths = max.map(function(w) { return w + (avail - natural) * (w / natural); });
-    } else {
-        widths = maxMinFairWidths(max, measureColumns(table, 'min-content'), avail);
+    // min-content is only needed when the columns can't all be satisfied, and
+    // it costs a second hidden layout pass, so it's measured lazily and cached.
+    let minCache = null;
+    const min = function() {
+        if (!minCache) minCache = measureColumns(table, 'min-content');
+        return minCache;
+    };
+
+    // A table with collapsed borders renders slightly wider than the sum of its
+    // columns — half an outer border on each side. One pixel is enough to trip
+    // `overflow-x: auto` and leave a scrollbar parked under every table. Rather
+    // than hard-code the overshoot, allocate, measure what actually rendered,
+    // and if it spills, give back exactly the excess and allocate once more.
+    let budget = avail;
+    for (let pass = 0; pass < 2; pass++) {
+        const widths = allocateColumns(max, min, budget);
+        applyColumnWidths(table, widths);
+
+        const sum = widths.reduce(function(a, b) { return a + b; }, 0);
+        const overshoot = Math.ceil(table.getBoundingClientRect().width - sum);
+        if (overshoot <= 0 || sum + overshoot <= avail) break;
+        budget = avail - overshoot;
     }
+}
 
+function applyColumnWidths(table, widths) {
     const old = table.querySelector('colgroup.marq-cols');
     if (old) old.remove();
     const group = document.createElement('colgroup');
@@ -725,6 +847,10 @@ function closeHelp() {
 
 function toggleGutter() {
     document.getElementById('line-gutter').classList.toggle('hidden');
+    // Showing or hiding the gutter moves the content column's left edge, so the
+    // width every table was sized against has just changed by the gutter width.
+    layoutTables();
+    buildGutter();
 }
 
 function navBack() {

@@ -50,13 +50,17 @@ Here's some *italic*, **bold**, ~~strikethrough~~, and `inline code`.
 
 ## Table
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Markdown rendering | Done | Using marked.js |
-| Syntax highlighting | Done | highlight.js |
-| Mermaid diagrams | Done | mermaid.js |
-| Math/LaTeX | Done | MathJax |
-| Vim navigation | Done | j/k/gg/G/Ctrl-D/U |
+The long `Notes` column exercises table column sizing: the short columns should
+each sit on a single line while `Notes` takes up the slack, and the whole table
+should stay within the window and grow as the window widens.
+
+| Feature | Status | Shortcut | Notes |
+|---------|--------|----------|-------|
+| Markdown rendering | Done | `r` | Using marked.js. Avast ye scurvy dogs, hoist the mainsail afore the parrot pilfers the last of the hardtack, for the tide waits on no buccaneer and the reef be closer than the bosun reckons. Yo ho ho and a bottle of rum, says the quartermaster, though the bottle be long empty and the rum longer gone. |
+| Syntax highlighting | Done | `h` | highlight.js. Blimey, the cap'n be three sheets to the wind again and the crow's nest stands empty while we drift towards the shoals of Tortuga. Splice the mainbrace and batten down the hatches, lest the squall take the topgallant and the cook's best kettle with it. |
+| Mermaid diagrams | Done | `m` | mermaid.js. Shiver me timbers, there be a kraken off the larboard bow, and nary a cannon loaded nor a powder monkey sober enough to load one. Dead men tell no tales, but the ship's log tells plenty, and this one speaks of a mutiny brewing below decks. |
+| Math/LaTeX | Done | `x` | MathJax. Arrr, fifteen men on a dead man's chest, and every last one of them arguing over the reckoning of the longitude, which no soul aboard can compute without the chronometer that went over the side in the last blow. |
+| Vim navigation | Done | `j/k/gg/G/Ctrl-D/U` | Walk the plank, ye bilge rat, for the black spot has been passed and the articles be clear on the matter. Weigh anchor and hoist the colours, we make for the Spanish Main by first light with whatever crew still draws breath. |
 
 ## Code Blocks
 

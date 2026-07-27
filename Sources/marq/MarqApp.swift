@@ -335,49 +335,61 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Export via the print system rather than WKWebView.createPDF().
+    //
+    // createPDF renders the entire scroll height onto a single page — a 20-page
+    // document comes out as one enormous sheet scaled down to fit, which is not
+    // a usable PDF. printOperation(with:) runs the same pagination the Print
+    // dialog uses, so the document breaks across pages and honours the @page and
+    // break-inside rules in template.html.
     func generatePDF(to url: URL) {
-        let hideToolbarJS = """
-        document.querySelector('.toolbar').style.display = 'none';
-        document.querySelectorAll('.code-copy-btn').forEach(btn => btn.style.display = 'none');
-        """
-        let showToolbarJS = """
-        document.querySelector('.toolbar').style.display = '';
-        document.querySelectorAll('.code-copy-btn').forEach(btn => btn.style.display = '');
-        """
+        let info = NSPrintInfo()
+        info.jobDisposition = .save
+        info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url as NSURL
+        info.horizontalPagination = .fit
+        info.verticalPagination = .automatic
+        info.isHorizontallyCentered = false
+        info.isVerticallyCentered = false
+        info.topMargin = 36
+        info.bottomMargin = 36
+        info.leftMargin = 36
+        info.rightMargin = 36
 
-        webView.evaluateJavaScript(hideToolbarJS) { [weak self] _, error in
-            if let error = error {
-                self?.log("Error hiding toolbar: \(error)")
-                return
-            }
+        let operation = webView.printOperation(with: info)
+        operation.showsPrintPanel = false
+        operation.showsProgressPanel = false
+        // The print operation lays the web view out at this size, so it must be
+        // the printable area rather than whatever the window happens to be.
+        operation.view?.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: info.paperSize.width - info.leftMargin - info.rightMargin,
+            height: info.paperSize.height - info.topMargin - info.bottomMargin
+        )
 
-            let config = WKPDFConfiguration()
-            self?.webView.createPDF(configuration: config) { result in
-                // Restore toolbar visibility
-                self?.webView.evaluateJavaScript(showToolbarJS, completionHandler: nil)
+        if let window = webView.window {
+            operation.runModal(
+                for: window,
+                delegate: self,
+                didRun: #selector(pdfExportDidRun(_:success:contextInfo:)),
+                contextInfo: nil
+            )
+        } else {
+            operation.run()
+            log("PDF exported to: \(url.path)")
+        }
+    }
 
-                switch result {
-                case .success(let data):
-                    do {
-                        try data.write(to: url)
-                        self?.log("PDF exported successfully to: \(url.path)")
-                    } catch {
-                        self?.log("ERROR writing PDF: \(error)")
-                        let alert = NSAlert()
-                        alert.messageText = "Export failed"
-                        alert.informativeText = error.localizedDescription
-                        alert.addButton(withTitle: "OK")
-                        alert.runModal()
-                    }
-                case .failure(let error):
-                    self?.log("ERROR generating PDF: \(error)")
-                    let alert = NSAlert()
-                    alert.messageText = "Export failed"
-                    alert.informativeText = error.localizedDescription
-                    alert.addButton(withTitle: "OK")
-                    alert.runModal()
-                }
-            }
+    @objc func pdfExportDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        if success {
+            log("PDF exported successfully")
+        } else {
+            log("ERROR generating PDF")
+            let alert = NSAlert()
+            alert.messageText = "Export failed"
+            alert.informativeText = "Could not generate the PDF."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         }
     }
 
