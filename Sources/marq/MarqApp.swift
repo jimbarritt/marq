@@ -424,16 +424,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func injectMarkdown() {
         log("Injecting markdown (\(rawMarkdown.count) chars)")
-        // Resolve relative image paths to absolute file:// URLs
+        // Resolve relative image paths to absolute file:// URLs with a cache-busting
+        // timestamp so WKWebView always re-reads from disk on each inject.
         var md = rawMarkdown
         if !filePath.isEmpty {
             let baseDir = URL(fileURLWithPath: filePath).deletingLastPathComponent().path
+            let cacheBuster = Int(Date().timeIntervalSince1970 * 1000)
             // Match ![alt](path) where path is relative (not http/https/file/data)
             let pattern = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\((?!https?://|file://|data:)([^)]+)\)"#)
             md = pattern.stringByReplacingMatches(
                 in: md,
                 range: NSRange(md.startIndex..., in: md),
-                withTemplate: "![$1](file://\(baseDir)/$2)"
+                withTemplate: "![$1](file://\(baseDir)/$2?t=\(cacheBuster))"
             )
         }
 
