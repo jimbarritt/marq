@@ -24,6 +24,108 @@ run-local *FLAGS:
         nohup .build/debug/marq examples/test.md &>/dev/null &
     fi
 
+### Harness ###################################################################
+#
+# Marq is a window: nothing about it is observable from a terminal unless the
+# app is asked to say what it did. These recipes are that asking. Every one of
+# them depends on `swift build`, which is deliberate — testing against a stale
+# binary, or against an app instance launched before the change, wasted three
+# separate debugging sessions. The template is read once at launch, so a running
+# Marq keeps rendering with the template it started with.
+#
+# Reach for the cheapest instrument that answers the question. `grep` beats
+# `just probe` for "why is this grey"; `just probe` beats exporting a PDF and
+# looking at it.
+
+harness_dir := ".harness"
+
+# The default width is stated because allocation depends on the available measure.
+#
+# Metrics for the screen layout, as JSON.
+probe FILE="examples/test.md" WIDTH="960": _build
+    @.build/debug/marq {{FILE}} --width {{WIDTH}} --dump-metrics - --timeout 60 2>/dev/null
+
+# Column widths, font scale and broken words as they will print.
+#
+# Measures the A4 page without exporting anything.
+probe-print FILE="examples/test.md": _build
+    @.build/debug/marq {{FILE}} --dump-metrics - --print --timeout 60 2>/dev/null
+
+# Just the headline: anything listed here is a bug.
+problems FILE="examples/test.md": _build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for mode in screen print; do
+        flag=""; [ "$mode" = print ] && flag="--print"
+        echo "== $mode"
+        .build/debug/marq {{FILE}} --width 960 --dump-metrics - $flag --timeout 60 2>/dev/null \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d["problems"], indent=2)); print("tables:", [(t["index"], t["fillPct"], t["fontScale"]) for t in d["tables"]])'
+    done
+
+# Screen render as a PNG, whole document. Prints the path.
+shot FILE="examples/test.md" WIDTH="960": _build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p {{harness_dir}}
+    OUT="{{harness_dir}}/$(basename {{FILE}} .md).png"
+    .build/debug/marq {{FILE}} --width {{WIDTH}} --export-png "$OUT" --timeout 60 2>/dev/null
+    echo "$OUT"
+
+# Export a PDF and report its shape. Prints the path.
+pdf FILE="examples/test.md": _build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p {{harness_dir}}
+    OUT="{{harness_dir}}/$(basename {{FILE}} .md).pdf"
+    .build/debug/marq {{FILE}} --export-pdf "$OUT" --timeout 90 2>/dev/null
+    .build/debug/pdftool info "$OUT" | python3 -c '
+    import json, sys
+    d = json.load(sys.stdin)
+    print("pages:", d["pageCount"])
+    for p in d["pages"]:
+        print("  p%s: text %s-%spt of %spt wide" % (p["page"], p.get("textLeftPt", 0), p.get("textRightPt", 0), p["widthPt"]))
+    '
+    echo "$OUT"
+
+# Render PDF pages to PNGs so they can be looked at.
+pages PDF FROM="1" TO="": _build
+    @.build/debug/pdftool pages {{PDF}} {{harness_dir}}/pages {{FROM}} {{TO}}
+
+# Text with x-positions — where a line starts and ends on the page.
+pdf-text PDF PAGE="": _build
+    @.build/debug/pdftool text {{PDF}} {{PAGE}}
+
+# A broken word is found here, not by squinting: the fragment is at a known x.
+#
+# Per-glyph bounds, optionally only for a matching string.
+pdf-chars PDF PAGE MATCH="": _build
+    @.build/debug/pdftool chars {{PDF}} {{PAGE}} {{MATCH}}
+
+# Column borders as printed, with the gaps between them — the real column widths.
+pdf-columns PDF PAGE: _build
+    @.build/debug/pdftool vlines {{PDF}} {{PAGE}}
+
+# Compare every fixture's metrics to its committed baseline.
+check *FIXTURES: _build
+    @python3 tools/check-metrics.py {{FIXTURES}}
+
+# Record the current metrics as the baseline. Read the diff before committing.
+bless *FIXTURES: _build
+    @python3 tools/check-metrics.py --bless {{FIXTURES}}
+
+# Headless runs carry a watchdog; a binary started by hand does not.
+#
+# Kill anything left running.
+kill-probes:
+    #!/usr/bin/env bash
+    pkill -f '.build/debug/marq' 2>/dev/null && echo "killed debug marq" || echo "no debug marq running"
+    pgrep -fl 'marq|pdftool' || true
+
+_build:
+    @swift build >&2
+
+### Packaging #################################################################
+
 # Build the .app bundle
 bundle: _build-release _build-icon
     #!/usr/bin/env bash

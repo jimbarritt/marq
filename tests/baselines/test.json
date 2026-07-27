@@ -1,0 +1,128 @@
+{
+  "pdf": {
+    "maxTextWidthPt": 518.03,
+    "pageCount": 12
+  },
+  "print": {
+    "headings": 25,
+    "problems": {
+      "atMinScale": [
+        0
+      ],
+      "brokenWords": [],
+      "missingImages": [],
+      "overflowing": []
+    },
+    "tableCount": 3,
+    "tables": [
+      {
+        "brokenColumns": [],
+        "columnCount": 6,
+        "fillPct": 100,
+        "fontScale": 0.6,
+        "headers": [
+          "Feature",
+          "Status",
+          "Key",
+          "Summary",
+          "Detail",
+          "Log"
+        ],
+        "index": 0,
+        "overflows": false,
+        "rowCount": 6
+      },
+      {
+        "brokenColumns": [],
+        "columnCount": 6,
+        "fillPct": 100,
+        "fontScale": 0.682,
+        "headers": [
+          "Manifest",
+          "Endpoint",
+          "Vessel",
+          "Crew",
+          "Stowage",
+          "Notes"
+        ],
+        "index": 1,
+        "overflows": false,
+        "rowCount": 5
+      },
+      {
+        "brokenColumns": [],
+        "columnCount": 2,
+        "fillPct": 100,
+        "fontScale": 1,
+        "headers": [
+          "Key",
+          "Action"
+        ],
+        "index": 2,
+        "overflows": false,
+        "rowCount": 11
+      }
+    ]
+  },
+  "screen": {
+    "headings": 25,
+    "problems": {
+      "atMinScale": [],
+      "brokenWords": [],
+      "missingImages": [],
+      "overflowing": [
+        1
+      ]
+    },
+    "tableCount": 3,
+    "tables": [
+      {
+        "brokenColumns": [],
+        "columnCount": 6,
+        "fillPct": 100,
+        "fontScale": 1,
+        "headers": [
+          "Feature",
+          "Status",
+          "Key",
+          "Summary",
+          "Detail",
+          "Log"
+        ],
+        "index": 0,
+        "overflows": false,
+        "rowCount": 6
+      },
+      {
+        "brokenColumns": [],
+        "columnCount": 6,
+        "fillPct": 120.32,
+        "fontScale": 1,
+        "headers": [
+          "Manifest",
+          "Endpoint",
+          "Vessel",
+          "Crew",
+          "Stowage",
+          "Notes"
+        ],
+        "index": 1,
+        "overflows": true,
+        "rowCount": 5
+      },
+      {
+        "brokenColumns": [],
+        "columnCount": 2,
+        "fillPct": 100,
+        "fontScale": 1,
+        "headers": [
+          "Key",
+          "Action"
+        ],
+        "index": 2,
+        "overflows": false,
+        "rowCount": 11
+      }
+    ]
+  }
+}

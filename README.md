@@ -84,12 +84,37 @@ They're complementary — Marq can browse an Obsidian vault, since a vault is ju
 open -a Marq path/to/file.md
 ```
 
+### Command line
+
+Marq can render without opening a window, which makes it scriptable:
+
+```bash
+marq notes.md --export-pdf notes.pdf     # export and quit
+marq notes.md --export-png notes.png     # whole document as an image
+marq notes.md --dump-metrics -           # report its layout as JSON
+```
+
+`marq --help` lists the rest.
+
 ### Building from source
 
 ```bash
 just bundle        # builds build/Marq.app
 just run-app       # builds and opens with test doc
+just check         # layout regression check against tests/baselines/
+just --list        # everything else, including the layout harness
 ```
+
+### The layout harness
+
+Marq is a window, so how it renders is not observable from a terminal — unless
+the app is asked to say what it did. It can: `--dump-metrics` reports the layout
+as JSON from inside the real `WKWebView`, `pdftool` measures an exported PDF
+down to the glyph, and `just check` compares both against committed baselines.
+
+See **[doc/agent-harness.md](doc/agent-harness.md)** for what it consists of,
+which instrument answers which question, and the measurement traps that have
+caught it out.
 
 ## Publishing a release
 

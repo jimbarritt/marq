@@ -1,0 +1,28 @@
+{
+  "pdf": {
+    "maxTextWidthPt": 500.66,
+    "pageCount": 2
+  },
+  "print": {
+    "headings": 4,
+    "problems": {
+      "atMinScale": [],
+      "brokenWords": [],
+      "missingImages": [],
+      "overflowing": []
+    },
+    "tableCount": 0,
+    "tables": []
+  },
+  "screen": {
+    "headings": 4,
+    "problems": {
+      "atMinScale": [],
+      "brokenWords": [],
+      "missingImages": [],
+      "overflowing": []
+    },
+    "tableCount": 0,
+    "tables": []
+  }
+}

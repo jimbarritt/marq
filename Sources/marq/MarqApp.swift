@@ -10,13 +10,65 @@ class SilentWebView: WKWebView {
     }
 }
 
+// Everything the harness needs the app to be able to say about itself.
+//
+// Marq is a window; nothing about it is observable from a terminal, so without
+// these flags every check has to be manufactured from outside — a standalone
+// WebKit host, a Chrome copy of the template, AppleScript driving the GUI. All
+// three were built and thrown away before the first of these flags existed and
+// worked on the first try. The cheapest way to make a GUI observable is to give
+// it a mouth.
+struct CLIOptions {
+    var file: String?
+    var exportPDF: String?
+    var exportPNG: String?
+    var dumpMetrics: String?      // "-" means stdout
+    var printMetrics = false      // measure the page rather than the window
+    var width: CGFloat?
+    var height: CGFloat?
+    var settle: Double = 1.5      // seconds to let mermaid/KaTeX/images stop moving
+    var timeout: Double = 60      // headless watchdog; 0 disables
+
+    var isHeadless: Bool { exportPDF != nil || exportPNG != nil || dumpMetrics != nil }
+
+    static func parse(_ args: [String]) -> CLIOptions {
+        var o = CLIOptions()
+        var i = 1
+        func value() -> String? {
+            guard i + 1 < args.count else { return nil }
+            i += 1
+            return args[i]
+        }
+        while i < args.count {
+            switch args[i] {
+            case "--export-pdf":   o.exportPDF = value()
+            case "--export-png":   o.exportPNG = value()
+            case "--dump-metrics": o.dumpMetrics = value()
+            case "--print":        o.printMetrics = true
+            case "--width":        o.width = value().flatMap(Double.init).map { CGFloat($0) }
+            case "--height":       o.height = value().flatMap(Double.init).map { CGFloat($0) }
+            case "--settle":       o.settle = value().flatMap(Double.init) ?? o.settle
+            case "--timeout":      o.timeout = value().flatMap(Double.init) ?? o.timeout
+            // NSApplication reads its own arguments; -key value pairs land in the
+            // argument domain of UserDefaults and are not ours to interpret.
+            case let a where a.hasPrefix("-") && a.count > 1:
+                if a.hasPrefix("--") { break } else { _ = value() }
+            case let a: if o.file == nil { o.file = a }
+            }
+            i += 1
+        }
+        return o
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var webView: WKWebView!
     var fileWatcher: FileWatcher?
     var filePath: String = ""
-    var pendingExportPath: String?   // --export-pdf <path>, exported then quit
+    var options = CLIOptions()
     var isHeadlessExport = false
+    var headlessStarted = false
     var rawMarkdown: String = ""
     // History is a list of *positions*, not files. An anchor jump does not change
     // the file, so a list of paths has nothing to push and Back either does
@@ -53,21 +105,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         log("Starting up")
 
         // Resolve file path from CLI args
-        let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "--export-pdf"), i + 1 < args.count {
-            pendingExportPath = args[i + 1]
-        }
-        if args.count > 1 {
-            let path = args[1]
-            if path.hasPrefix("/") {
-                filePath = path
-            } else {
-                let cwd = FileManager.default.currentDirectoryPath
-                filePath = URL(fileURLWithPath: cwd).appendingPathComponent(path).path
-            }
+        options = CLIOptions.parse(CommandLine.arguments)
+        if let path = options.file {
+            filePath = AppDelegate.absolute(path)
         }
 
         log("File path resolved: \(filePath.isEmpty ? "(none)" : filePath)")
+
+        // A headless run that wedges must not survive to eat the disk. One did:
+        // a print job went pathological and wrote 17 GB over 42 minutes because
+        // nothing was supervising it. This timer runs on a background queue and
+        // calls exit() rather than terminate(), so a jammed main thread — the
+        // exact failure — cannot stop it firing.
+        if options.isHeadless && options.timeout > 0 {
+            let limit = options.timeout
+            DispatchQueue.global().asyncAfter(deadline: .now() + limit) {
+                FileHandle.standardError.write(Data("[marq] TIMEOUT after \(limit)s\n".utf8))
+                exit(2)
+            }
+        }
 
         // Configure WKWebView with message handler for link navigation
         let config = WKWebViewConfiguration()
@@ -92,7 +148,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // on the command line as `-textZoom 8` lands in the argument domain as a
         // string, and the cast would silently drop it. The nil check keeps an
         // absent key from reading as index 0.
-        if UserDefaults.standard.object(forKey: AppDelegate.zoomDefaultsKey) != nil {
+        // A headless run always measures at 100%. Otherwise every number it
+        // reports is silently multiplied by whatever the reader last zoomed to,
+        // and two runs of the same command disagree.
+        if options.isHeadless {
+            zoomIndex = AppDelegate.defaultZoomIndex
+        } else if UserDefaults.standard.object(forKey: AppDelegate.zoomDefaultsKey) != nil {
             let saved = UserDefaults.standard.integer(forKey: AppDelegate.zoomDefaultsKey)
             zoomIndex = min(max(saved, 0), AppDelegate.zoomSteps.count - 1)
         }
@@ -101,8 +162,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         log("Creating window")
         // Create window
         let screenRect = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 960, height: 700)
-        let windowWidth: CGFloat = 960
-        let windowHeight: CGFloat = 700
+        // --width/--height make screen layout reproducible. Table allocation is a
+        // function of the available measure, so a metrics run at whatever size
+        // the window happened to open at is not comparable to anything.
+        let windowWidth: CGFloat = options.width ?? 960
+        let windowHeight: CGFloat = options.height ?? 700
         let windowRect = NSRect(
             x: (screenRect.width - windowWidth) / 2,
             y: (screenRect.height - windowHeight) / 2,
@@ -627,28 +691,120 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.pendingScrollRestore = nil
                     self?.webView.evaluateJavaScript("restoreScroll(\(y));", completionHandler: nil)
                 }
-                self?.runPendingExportIfAny()
+                self?.runHeadlessTaskIfAny()
             }
         }
     }
 
-    // `marq file.md --export-pdf out.pdf` exports without touching the UI and
-    // quits, so export can be scripted and checked.
+    static func absolute(_ path: String) -> String {
+        if path.hasPrefix("/") { return path }
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(path).path
+    }
+
+    // Headless work runs once, after the document has stopped moving, and then
+    // the app quits. Rendering is asynchronous all the way down — this fires
+    // from the markdown-injected callback, which happens on every reload — so
+    // the guard matters.
     //
-    // The delay is not politeness: the export measures the rendered document, and
-    // mermaid, KaTeX and images all settle after renderMarkdown returns. Exporting
-    // in the same turn measures a document that is still moving.
-    func runPendingExportIfAny() {
-        guard let out = pendingExportPath else { return }
-        pendingExportPath = nil
-        isHeadlessExport = true
-        log("Exporting to \(out)")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            let path = out.hasPrefix("/")
-                ? out
-                : URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                    .appendingPathComponent(out).path
-            self.generatePDF(to: URL(fileURLWithPath: path))
+    // The settle delay is not politeness: mermaid, KaTeX and images all resolve
+    // after renderMarkdown returns, and measuring in the same turn measures a
+    // document that is still changing under the ruler.
+    func runHeadlessTaskIfAny() {
+        guard options.isHeadless, !headlessStarted else { return }
+        headlessStarted = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + options.settle) {
+            if let out = self.options.dumpMetrics {
+                self.dumpMetrics(to: out)
+            } else if let out = self.options.exportPNG {
+                self.exportPNG(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
+            } else if let out = self.options.exportPDF {
+                self.isHeadlessExport = true
+                self.log("Exporting to \(out)")
+                self.generatePDF(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
+            }
+        }
+    }
+
+    // Ask the renderer what it did. The numbers come from the same WKWebView
+    // that draws the window, which is the whole point: a Chrome reproduction of
+    // template.html cannot see WebKit's print scaling and confidently reported
+    // column widths for a page that would never be printed.
+    func dumpMetrics(to out: String) {
+        var arguments: [String: Any] = [:]
+        if options.printMetrics {
+            let info = NSPrintInfo()
+            // Matches generatePDF's 36pt margins, so the numbers describe the
+            // page the export actually produces.
+            arguments["w"] = info.paperSize.width - 72
+            arguments["h"] = info.paperSize.height - 72
+        }
+        let js = arguments.isEmpty
+            ? "return await marqMetricsWhenSettled();"
+            : "return await marqMetricsWhenSettled(w, h);"
+        // callAsyncJavaScript rather than evaluateJavaScript: the readiness wait
+        // is a promise, and evaluateJavaScript would hand back the unresolved
+        // promise as null without waiting for anything.
+        webView.callAsyncJavaScript(js, arguments: arguments, in: nil, in: .page) { [weak self] outcome in
+            let result: Any?
+            let error: Error?
+            switch outcome {
+            case .success(let value): result = value; error = nil
+            case .failure(let e): result = nil; error = e
+            }
+            guard let self = self else { return }
+            if let error = error {
+                self.log("ERROR collecting metrics: \(error)")
+                exit(1)
+            }
+            let json = (result as? String) ?? "{}"
+            if out == "-" {
+                FileHandle.standardOutput.write(Data((json + "\n").utf8))
+            } else {
+                let path = AppDelegate.absolute(out)
+                do {
+                    try json.write(toFile: path, atomically: true, encoding: .utf8)
+                    self.log("Metrics written to \(path)")
+                } catch {
+                    self.log("ERROR writing metrics: \(error)")
+                    exit(1)
+                }
+            }
+            NSApp.terminate(nil)
+        }
+    }
+
+    // A screen render, headlessly. The alternative in practice was `screencapture`
+    // plus AppleScript to focus the right window, which needs the app frontmost
+    // and catches whatever else is on screen.
+    func exportPNG(to url: URL) {
+        let config = WKSnapshotConfiguration()
+        config.rect = webView.bounds
+        // Capture the whole document, not just the visible part: the interesting
+        // failures are usually below the fold.
+        webView.evaluateJavaScript("document.documentElement.scrollHeight") { [weak self] height, _ in
+            guard let self = self else { return }
+            if let h = height as? CGFloat, h > self.webView.bounds.height {
+                self.webView.frame.size.height = h
+                config.rect = self.webView.bounds
+            }
+            self.webView.takeSnapshot(with: config) { image, error in
+                guard let image = image,
+                      let tiff = image.tiffRepresentation,
+                      let rep = NSBitmapImageRep(data: tiff),
+                      let png = rep.representation(using: .png, properties: [:]) else {
+                    self.log("ERROR taking snapshot: \(error.map { "\($0)" } ?? "no image")")
+                    exit(1)
+                }
+                do {
+                    try png.write(to: url)
+                    self.log("PNG written to \(url.path)")
+                } catch {
+                    self.log("ERROR writing PNG: \(error)")
+                    exit(1)
+                }
+                NSApp.terminate(nil)
+            }
         }
     }
 

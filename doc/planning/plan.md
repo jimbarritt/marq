@@ -5,12 +5,19 @@
 - **Next:** Task 5 — Header row can be orphaned at the foot of a page (Delta: PDF Export Fidelity)
 - **Sub-doc:** (none)
 - **Blockers:** None
-- **Context:** See [Checkpoint: Session 2026-07-27 (late evening)](#checkpoint-session-2026-07-27-late-evening)
+- **Context:** See [Checkpoint: Session 2026-07-27 (harness)](#checkpoint-session-2026-07-27-harness)
+- **Before verifying any layout change:** `just problems`, then `just check`. See the `/verify` skill.
 
 ## Summary
 
 | Delta | Task | Status |
 |-------|------|--------|
+| [Delta: Verification Harness](#delta-verification-harness) | [1. Make the app observable](#task-1-make-the-app-observable) | ✓ DONE |
+| | [2. Measurement for exported PDFs](#task-2-measurement-for-exported-pdfs) | ✓ DONE |
+| | [3. Recipes and golden baselines](#task-3-recipes-and-golden-baselines) | ✓ DONE |
+| | [4. Supervision](#task-4-supervision) | ✓ DONE |
+| | [5. Write it down](#task-5-write-it-down) | ✓ DONE |
+| | [6. Screen table overflow at 960px](#task-6-screen-table-overflow-at-960px) | TODO |
 | [Delta: PDF Export Fidelity](#delta-pdf-export-fidelity) | [1. Verify export against a real WebKit print run](#task-1-verify-export-against-a-real-webkit-print-run) | ✓ DONE |
 | | [2. Pelican section page break](#task-2-pelican-section-page-break) | IN PROGRESS |
 | | [3. Confirm CSS px to points mapping](#task-3-confirm-css-px-to-points-mapping) | ✓ DONE |
@@ -19,6 +26,45 @@
 | | [6. Print font scale solved in one step](#task-6-print-font-scale-solved-in-one-step-so-minimums-did-not-fit) | ✓ DONE |
 
 Archived Deltas: see the [archive index](archive/index.md)
+
+## Delta: Verification Harness
+
+Built from the recommendations in
+`~/Code/github/jimbarritt/ag-seminar/notes/interesting-claude-sessions/marq-harness-analysis.md`:
+eleven instruments were improvised and thrown away across three sessions, two of
+them reinvented from scratch later, and eight verifications turned out to prove
+nothing. The one that survived was a CLI flag on the app itself, so the rest are
+built the same way.
+
+### Task 1: Make the app observable
+- ✓ DONE — `--export-png`, `--dump-metrics [--print]`, `--width/--height`, `--settle`, `--timeout`, `--help`
+  - `marqMetrics()` in `template.html` reports what the layout did, from inside the real WKWebView: per table its fill percentage, font scale, and per column the allocated width against `naturalMin`, the width of its longest unbroken word. `width < naturalMin` is exactly where "Manifes/t" comes from, and it is now a boolean.
+  - `--print` measures the A4 page without exporting anything. It reproduces the hard-won numbers from the print work in one command: printable width 653 CSS px, tables at 100% fill, scales 0.6 and 0.682.
+  - Metrics wait on `document.fonts.ready` before measuring. Without it the same command returned 110.61% and 120.32% fill for the same table depending on how warm the font cache was — the first baselines recorded the cold figure.
+
+### Task 2: Measurement for exported PDFs
+- ✓ DONE — `Sources/pdftool`, an executable in the same package
+  - `info`, `pages`, `text`, `chars`, `vlines`. Replaces `render.swift`, `lines.swift`, `chars.swift`, `vlines.swift` and `bars.swift`, three of which had been written twice.
+  - PDFKit's `characterBounds(at:)` is not indexed like `page.string` — newlines have no glyph, so the index runs behind by one per line already passed. Feeding it the string index returns another glyph's rectangle, drifting further down the page; extracted text came back as a shuffled crossword and every position read off it was wrong.
+
+### Task 3: Recipes and golden baselines
+- ✓ DONE — `just problems / probe / probe-print / shot / pdf / pages / pdf-text / pdf-chars / pdf-columns / check / bless`
+  - All depend on `swift build`, which makes the stale-build and stale-bundle class of error structurally impossible.
+  - `just check` compares fixture metrics to `tests/baselines/`. Verified by breaking `MIN_PRINT_TABLE_SCALE` on purpose: it caught the font scale change, six columns starting to break words, and the page count going 12 → 13.
+
+### Task 4: Supervision
+- ✓ DONE — headless runs carry a watchdog, default 60s
+  - It runs on a background queue and calls `exit()` rather than `terminate()`, so a jammed main thread — the exact failure that once ran 42 minutes at 100% CPU and wrote 17 GB — cannot stop it firing. Verified.
+  - `just kill-probes` for anything started by hand.
+
+### Task 5: Write it down
+- ✓ DONE — `CLAUDE.md` and a `/verify` skill
+  - The repo had neither. `/verify` orders the instruments by cost and starts with "read the source first", which is the habit the analysis identified as most expensive.
+
+### Task 6: Screen table overflow at 960px
+- TODO — the harness's first finding, not a regression
+  - `just problems examples/test.md` reports the prose table overflowing its wrapper on screen: it renders 1078px wide against an 896px measure, 120% of it, so it sits behind a horizontal scrollbar.
+  - Print is unaffected. The question is whether a scrollable table is the intended answer at that width, or whether the screen path should scale the font as print does.
 
 ## Delta: PDF Export Fidelity
 
@@ -56,6 +102,20 @@ Archived Deltas: see the [archive index](archive/index.md)
   - A second, separate cause of the same symptom: `allocateForPrint` floored columns at *exactly* their measured minimum, and shares the surplus by content volume — so the narrow columns sat on their floor with no tolerance, and the print renderer sets the same text a shade wider than the screen measurement of it. `PRINT_COLUMN_SLACK` (3%) now pads the floor, and `fitTableFontForPrint` targets `avail / PRINT_COLUMN_SLACK` so the two agree.
   - Fixing only the first cause moved the break from the reference table's "Manifest" to the prose table's "Status" — the symptom is one column landing a hair short, and there was more than one way to land there.
   - Separately: pinning `#content` to the printable width did nothing at first — `flex: 1` grew it straight back. Measurement was happening at ~1060px for a 653px page.
+
+## Checkpoint: Session 2026-07-27 (harness)
+
+**What was completed this session:**
+- Built the verification harness the analysis note recommended: metrics and PNG export as CLI flags on the app, `pdftool` for measuring exported PDFs, eleven `just` recipes, golden baselines with `just check`, a watchdog on every headless run, and `CLAUDE.md` plus a `/verify` skill.
+- Three defects found and fixed in the harness itself while building it, each of the "verification that verifies nothing" kind: PDFKit's newline-shifted character indexing, line clustering anchored on whichever glyph came first, and metrics measured before the web fonts had loaded.
+
+**State of the project:**
+`just check` is green on both fixtures and stable across runs. Nothing about the shipped rendering behaviour changed — the only edits to the render path are additive. Uncommitted: `MarqApp.swift`, `main.swift`, `template.html`, `Package.swift`, `justfile`, `README.md`, new `Sources/pdftool/`, `tools/`, `tests/baselines/`, `CLAUDE.md`, `.claude/`.
+
+**Immediate next priorities:**
+1. Orphaned table header at a page foot (PDF Export Fidelity, Task 5) — a decision, not a fix.
+2. The pelican page break (PDF Export Fidelity, Task 2) — now cheap to test: `just pdf` then `just pages`.
+3. Screen table overflow at 960px (Verification Harness, Task 6) — the harness's first finding.
 
 ## Checkpoint: Session 2026-07-27 (late evening)
 

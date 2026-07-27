@@ -1106,6 +1106,137 @@ function layoutTables() {
     });
 }
 
+// Report what the layout actually did, as JSON, from inside the real engine.
+//
+// Every question these sessions kept asking — is the table filling the measure,
+// which column is a hair too narrow, did the font scale fire, is an image
+// missing — is a number that already exists in this document. Extracting it here
+// beats extracting it from a Chrome copy of the template, because Chrome does
+// not share WebKit's print pipeline (see PRINT_SHRINK_FACTOR) and so answered
+// some of these questions confidently and wrongly.
+//
+// `widthPt` switches to the print layout for the duration, so metrics can be
+// taken of the page rather than the window without exporting a PDF first.
+function marqMetrics(widthPt, heightPt) {
+    const printing = !!widthPt;
+    if (printing) layoutTablesForPrint(widthPt, heightPt);
+
+    const content = document.getElementById('content');
+    const bodySize = parseFloat(getComputedStyle(document.body).fontSize) || 16;
+    const avail = availableTableWidth();
+
+    const tables = [];
+    content.querySelectorAll('table').forEach(function(table, index) {
+        const wrapper = table.parentElement;
+        const head = table.rows[0];
+        const rect = table.getBoundingClientRect();
+        const naturalMin = measureNaturalMin(table);
+        const maxContent = measureColumns(table, 'max-content');
+        const scale = (parseFloat(getComputedStyle(table).fontSize) || bodySize) / bodySize;
+
+        const columns = [];
+        for (let i = 0; head && i < head.cells.length; i++) {
+            const w = head.cells[i].getBoundingClientRect().width;
+            columns.push({
+                header: head.cells[i].textContent.trim(),
+                width: round(w),
+                pct: round(rect.width ? w / rect.width * 100 : 0),
+                maxContent: round(maxContent[i]),
+                // Width of the longest unbroken word. A column narrower than
+                // this is where "Manifes/t" comes from, so it is the single
+                // most load-bearing number here.
+                naturalMin: round(naturalMin[i]),
+                breaksWords: w + 0.5 < naturalMin[i]
+            });
+        }
+
+        tables.push({
+            index: index,
+            columnCount: columns.length,
+            rowCount: table.rows.length,
+            avail: round(avail),
+            width: round(rect.width),
+            height: round(rect.height),
+            // How much of the available measure the table actually occupies. A
+            // table that "looked full width" and was at 80% is the reason this
+            // is reported rather than eyeballed.
+            fillPct: round(avail ? rect.width / avail * 100 : 0),
+            fontScale: round(scale, 3),
+            scaled: scale < 0.999,
+            atMinScale: scale <= MIN_PRINT_TABLE_SCALE + 0.001,
+            overflows: !!wrapper && wrapper.scrollWidth > wrapper.clientWidth + 1,
+            brokenColumns: columns.filter(function(c) { return c.breaksWords; })
+                                  .map(function(c) { return c.header; }),
+            columns: columns
+        });
+    });
+
+    const images = [];
+    content.querySelectorAll('img').forEach(function(img) {
+        images.push({
+            src: img.getAttribute('src') || '',
+            loaded: img.complete && img.naturalWidth > 0,
+            width: round(img.getBoundingClientRect().width),
+            height: round(img.getBoundingClientRect().height)
+        });
+    });
+
+    const result = {
+        mode: printing ? 'print' : 'screen',
+        viewportWidth: document.documentElement.clientWidth,
+        viewportHeight: document.documentElement.clientHeight,
+        printWidthPx: printWidthOverride,
+        printHeightPx: printHeightOverride,
+        contentWidth: round(content.getBoundingClientRect().width),
+        documentHeight: round(document.documentElement.scrollHeight),
+        bodyFontSize: round(bodySize),
+        headings: content.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
+        codeBlocks: content.querySelectorAll('pre').length,
+        mermaid: content.querySelectorAll('.mermaid svg').length,
+        tableCount: tables.length,
+        // The summary line worth reading first: anything true here is a bug.
+        problems: {
+            brokenWords: tables.filter(function(t) { return t.brokenColumns.length; })
+                               .map(function(t) { return t.index; }),
+            overflowing: tables.filter(function(t) { return t.overflows; })
+                               .map(function(t) { return t.index; }),
+            atMinScale: tables.filter(function(t) { return t.atMinScale; })
+                              .map(function(t) { return t.index; }),
+            missingImages: images.filter(function(i) { return !i.loaded; })
+                                 .map(function(i) { return i.src; })
+        },
+        tables: tables,
+        images: images
+    };
+
+    if (printing) restoreTableLayoutAfterPrint();
+    return JSON.stringify(result, null, 2);
+}
+
+// Measure only once the document has stopped changing shape.
+//
+// Column widths are measured from laid-out text, so a run that measures before
+// the web fonts have loaded measures fallback metrics and reports a different
+// table width from the identical run a minute later. That is precisely the kind
+// of instrument that proves nothing: it disagrees with itself depending on how
+// warm the font cache is, and a recorded baseline taken on a cold cache fails
+// forever after.
+async function marqMetricsWhenSettled(widthPt, heightPt) {
+    await document.fonts.ready;
+    await Promise.all(Array.from(document.images)
+        .filter(function(img) { return !img.complete; })
+        .map(function(img) {
+            return new Promise(function(resolve) { img.onload = img.onerror = resolve; });
+        }));
+    layoutTables();
+    return marqMetrics(widthPt, heightPt);
+}
+
+function round(n, dp) {
+    const f = Math.pow(10, dp === undefined ? 2 : dp);
+    return Math.round((n || 0) * f) / f;
+}
+
 let tableLayoutTimer = null;
 window.addEventListener('resize', function() {
     clearTimeout(tableLayoutTimer);
