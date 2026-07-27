@@ -15,6 +15,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var webView: WKWebView!
     var fileWatcher: FileWatcher?
     var filePath: String = ""
+    var pendingExportPath: String?   // --export-pdf <path>, exported then quit
+    var isHeadlessExport = false
     var rawMarkdown: String = ""
     var history: [String] = []
     var historyIndex: Int = -1
@@ -34,6 +36,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Resolve file path from CLI args
         let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--export-pdf"), i + 1 < args.count {
+            pendingExportPath = args[i + 1]
+        }
         if args.count > 1 {
             let path = args[1]
             if path.hasPrefix("/") {
@@ -395,6 +400,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func pdfExportDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
         restoreAfterPrint()
+        if isHeadlessExport {
+            log(success ? "PDF exported successfully" : "ERROR generating PDF")
+            NSApp.terminate(nil)
+            return
+        }
         if success {
             log("PDF exported successfully")
         } else {
@@ -477,7 +487,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.log("JS ERROR: \(error)")
             } else {
                 self?.log("Markdown injected successfully")
+                self?.runPendingExportIfAny()
             }
+        }
+    }
+
+    // `marq file.md --export-pdf out.pdf` exports without touching the UI and
+    // quits, so export can be scripted and checked.
+    //
+    // The delay is not politeness: the export measures the rendered document, and
+    // mermaid, KaTeX and images all settle after renderMarkdown returns. Exporting
+    // in the same turn measures a document that is still moving.
+    func runPendingExportIfAny() {
+        guard let out = pendingExportPath else { return }
+        pendingExportPath = nil
+        isHeadlessExport = true
+        log("Exporting to \(out)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let path = out.hasPrefix("/")
+                ? out
+                : URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                    .appendingPathComponent(out).path
+            self.generatePDF(to: URL(fileURLWithPath: path))
         }
     }
 

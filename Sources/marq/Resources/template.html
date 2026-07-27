@@ -101,6 +101,16 @@
         overflow-wrap: break-word;
     }
 
+    /* A header with no alignment declared in the markdown gets the UA default,
+       which is `center` — github-markdown-css never says otherwise, so a plain
+       `|---|` table came out with centred headers over left-aligned data. GitHub
+       renders those left. `:not([align])` keeps out of the way of a table that
+       does declare its alignment: marked writes that as an align attribute, and
+       a presentational attribute loses to any author rule. */
+    .markdown-body table th:not([align]) {
+        text-align: left;
+    }
+
     /* Tables break out of the 980px prose measure and use the full window
        width. The width itself is set by layoutTables() rather than in CSS —
        see availableTableWidth(). */
@@ -399,6 +409,9 @@
             page-break-inside: avoid;
         }
 
+        /* Repeat the header on every page the table spans. WebKit honours this
+           much; it ignores break-after/break-inside on thead and tr, so a header
+           that lands at the very foot of a page stays there — see the plan. */
         thead {
             display: table-header-group;
         }
@@ -727,8 +740,18 @@ function maxMinFairWidths(max, min, avail) {
 // proportion to how much each column actually holds. That evens up the number of
 // lines per column, which is what keeps the table short. fitTableFontForPrint()
 // has already scaled the text so the natural minimums fit.
-function allocateForPrint(max, naturalMin, budget) {
+//
+// The floor carries a few percent of slack, because a column floored at exactly
+// its measured minimum has no tolerance at all, and it needs some: the print
+// renderer sets the same text a shade wider than the screen measurement of it.
+// Since the surplus is shared out by content volume, the narrow columns are the
+// ones left sitting exactly on their floor — so they are exactly the ones that
+// broke, a "Status" header printing as "Statu/s" in a column sized for it.
+const PRINT_COLUMN_SLACK = 1.03;
+
+function allocateForPrint(max, rawMin, budget) {
     const n = max.length;
+    const naturalMin = rawMin.map(function(m) { return m * PRINT_COLUMN_SLACK; });
     const minSum = naturalMin.reduce(function(a, b) { return a + b; }, 0);
 
     let widths;
@@ -778,10 +801,22 @@ function measureNaturalMin(table) {
 // scrollX is added back to keep the result stable when the page is scrolled
 // horizontally; without it a scrolled page would widen the table further and
 // feed back on itself.
-// Set while exporting: the printable width in CSS px, supplied by the Swift
-// side because only it knows the paper size and margins.
+// Set while exporting: the printable area in CSS px. The Swift side supplies it
+// in points, because only it knows the paper size and margins; see
+// PRINT_SHRINK_FACTOR for why those are not the same number.
 let printWidthOverride = null;
 let printHeightOverride = null;
+
+// WebKit does not lay a print job out at the paper size. It lays it out 1.25x
+// larger and shrinks the result onto the paper — its minimum shrink factor.
+// Measured, not assumed: a probe of `width: 400px` printed 320.25pt wide on A4
+// (0.8 pt per CSS px), and a `width: 100%` probe printed the full 523pt.
+//
+// So the printable width in points is 1.25x that many CSS px, and passing points
+// straight through laid every table out a fifth too narrow — leaving a ragged
+// gap down the right of the page — and shrank the text to fit a width that was
+// never the real constraint.
+const PRINT_SHRINK_FACTOR = 1.25;
 
 // Smallest the table text may be scaled to. Below roughly 60% of body size the
 // table stops being readable, and a few extra pages is the better trade.
@@ -808,10 +843,23 @@ function availableTableWidth() {
 // minimum width enough to fit a narrow page. It is applied before measuring so
 // the measurement matches the layout it is used for. It cannot collapse columns
 // the way it did under auto layout, because here the widths are explicit.
-function layoutTablesForPrint(widthPx, heightPx) {
+function layoutTablesForPrint(widthPt, heightPt) {
     document.body.classList.add('marq-printing');
-    printWidthOverride = Math.max(1, Math.floor(widthPx));
-    printHeightOverride = heightPx ? Math.max(1, Math.floor(heightPx)) : null;
+    printWidthOverride = Math.max(1, Math.floor(widthPt * PRINT_SHRINK_FACTOR));
+    printHeightOverride = heightPt ? Math.max(1, Math.floor(heightPt * PRINT_SHRINK_FACTOR)) : null;
+
+    // Measure the document at the width it will be printed at, not the width the
+    // window happens to be. Everything downstream — how tall a table comes out,
+    // whether its text needs shrinking — is read off a live layout, and a layout
+    // at the wrong width answers those questions about a page that will never be
+    // printed. The screen measure is restored afterwards.
+    // `flex: 1` on the content column would grow it straight back past the width
+    // set here, which is how the pinning silently did nothing the first time.
+    const content = document.getElementById('content');
+    content.style.flex = '0 0 auto';
+    content.style.maxWidth = 'none';
+    content.style.width = printWidthOverride + 'px';
+
     layoutTables();
     return true;
 }
@@ -820,6 +868,10 @@ function restoreTableLayoutAfterPrint() {
     document.body.classList.remove('marq-printing');
     printWidthOverride = null;
     printHeightOverride = null;
+    const content = document.getElementById('content');
+    content.style.flex = '';
+    content.style.width = '';
+    content.style.maxWidth = '';
     document.querySelectorAll('#content table').forEach(function(t) {
         t.style.fontSize = '';
     });
@@ -850,14 +902,42 @@ function allocateColumns(max, min, budget, table) {
 // minimums, so scale the font down just enough to fit — floored, because past a
 // point the table is unreadable anyway and a few broken words are the better
 // trade. Only ever shrinks: tables that already fit are left alone.
+//
+// A column's minimum does not scale with the font. Padding and borders are fixed
+// pixels — 11px per column here, 66px across six of them — so halving the text
+// does not halve the minimum. Solving for the scale in one step therefore
+// overshoots: a scale computed to bring the minimums to 640px left them at 662,
+// the allocator handed every column 1.4% less than its longest word, and the
+// narrowest header printed as "Manifes/t" in a column that looked roomy.
+//
+// So measure at the scale being considered, and refine. Two or three passes
+// converge, because each pass only has to correct for the fixed part.
+//
+// Aim under the page by the same slack the allocator floors columns with, so the
+// two agree: scaling until the bare minimums fit exactly would leave the floors
+// PRINT_COLUMN_SLACK over the page, and the allocator would shave every column
+// back under its longest word again.
+const PRINT_FIT_PASSES = 3;
+
 function fitTableFontForPrint(table, avail) {
-    table.style.fontSize = '';
-    const min = measureNaturalMin(table);
-    const needed = min.reduce(function(a, b) { return a + b; }, 0);
-    if (needed > avail && avail > 0) {
-        return Math.max(MIN_PRINT_TABLE_SCALE, avail / needed);
+    const target = avail / PRINT_COLUMN_SLACK;
+    if (target <= 0) return 1;
+
+    let scale = 1;
+    for (let pass = 0; pass < PRINT_FIT_PASSES; pass++) {
+        applyTableScale(table, scale);
+        const min = measureNaturalMin(table);
+        const needed = min.reduce(function(a, b) { return a + b; }, 0);
+        if (needed <= target) break;
+
+        const next = Math.max(MIN_PRINT_TABLE_SCALE, scale * (target / needed));
+        const settled = next > scale - 0.005;
+        scale = next;
+        if (settled) break;
     }
-    return 1;
+
+    table.style.fontSize = '';
+    return scale;
 }
 
 function applyTableScale(table, scale) {
@@ -883,7 +963,8 @@ function sizeTableColumns(table, wrapper) {
     const n = head.cells.length;
     const avail = availableTableWidth();
     if (!avail) return;
-    wrapper.style.width = avail + 'px';
+    // Same reasoning as applyColumnWidths: on paper, relative rather than fixed.
+    wrapper.style.width = printWidthOverride !== null ? '100%' : avail + 'px';
 
     let scale = printWidthOverride ? fitTableFontForPrint(table, avail) : 1;
     if (printWidthOverride) applyTableScale(table, scale);
@@ -939,15 +1020,26 @@ function applyColumnWidths(table, widths, satisfied) {
     if (old) old.remove();
     const group = document.createElement('colgroup');
     group.className = 'marq-cols';
+    const total = widths.reduce(function(a, b) { return a + b; }, 0);
+
+    // On paper the widths are stated as percentages of a full-width table rather
+    // than in pixels. The allocation is computed against an assumed printable
+    // width, and any error in that assumption — a shrink factor that changes, a
+    // margin the layout accounts for differently — leaves a pixel-sized table
+    // short of the page edge. Proportions cannot be short: whatever width the
+    // print layout settles on, the table fills it in the ratios chosen here.
+    const asPercent = printWidthOverride !== null && total > 0;
     widths.forEach(function(w) {
         const col = document.createElement('col');
-        col.style.width = w.toFixed(2) + 'px';
+        col.style.width = asPercent
+            ? (w / total * 100).toFixed(3) + '%'
+            : w.toFixed(2) + 'px';
         group.appendChild(col);
     });
     table.insertBefore(group, table.firstChild);
 
     table.style.tableLayout = 'fixed';
-    table.style.width = widths.reduce(function(a, b) { return a + b; }, 0).toFixed(2) + 'px';
+    table.style.width = asPercent ? '100%' : total.toFixed(2) + 'px';
 }
 
 function layoutTables() {

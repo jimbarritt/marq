@@ -2,7 +2,7 @@
 
 ## What's Next
 
-- **Next:** Task 1 — Verify export against a real WebKit print run (Delta: PDF Export Fidelity)
+- **Next:** Task 5 — decide whether the orphaned header row is worth a JS pagination heuristic (Delta: PDF Export Fidelity)
 - **Sub-doc:** (none)
 - **Blockers:** None
 - **Context:** See [Checkpoint: Session 2026-07-27](#checkpoint-session-2026-07-27)
@@ -14,10 +14,13 @@
 | [Delta: Table Layout](#delta-table-layout) | [1. Replace GitHub max-content table sizing](#task-1-replace-github-max-content-table-sizing) | ✓ DONE |
 | | [2. Fair column width allocation](#task-2-fair-column-width-allocation) | ✓ DONE |
 | | [3. Full-width tables and gutter tracking](#task-3-full-width-tables-and-gutter-tracking) | ✓ DONE |
-| [Delta: PDF Export Fidelity](#delta-pdf-export-fidelity) | [1. Verify export against a real WebKit print run](#task-1-verify-export-against-a-real-webkit-print-run) | TODO |
+| | [4. Header alignment](#task-4-header-alignment) | ✓ DONE |
+| [Delta: PDF Export Fidelity](#delta-pdf-export-fidelity) | [1. Verify export against a real WebKit print run](#task-1-verify-export-against-a-real-webkit-print-run) | ✓ DONE |
 | | [2. Pelican section page break](#task-2-pelican-section-page-break) | IN PROGRESS |
-| | [3. Confirm CSS px to points mapping](#task-3-confirm-css-px-to-points-mapping) | TODO |
+| | [3. Confirm CSS px to points mapping](#task-3-confirm-css-px-to-points-mapping) | ✓ DONE |
 | | [4. Respect system page setup](#task-4-respect-system-page-setup) | TODO |
+| | [5. Header row can be orphaned at the foot of a page](#task-5-header-row-can-be-orphaned-at-the-foot-of-a-page) | TODO |
+| | [6. Print font scale solved in one step](#task-6-print-font-scale-solved-in-one-step-so-minimums-did-not-fit) | ✓ DONE |
 | [Delta: Links and Navigation](#delta-links-and-navigation) | [1. Open external links in the browser](#task-1-open-external-links-in-the-browser) | ✓ DONE |
 | | [2. Link destination status bar](#task-2-link-destination-status-bar) | ✓ DONE |
 | | [3. Verify internal anchor links in the app](#task-3-verify-internal-anchor-links-in-the-app) | TODO |
@@ -42,12 +45,17 @@
   - `availableTableWidth()` measures from the content column's left edge rather than `calc(100vw - …)`; `100vw` includes the scrollbar and hard-coding the gutter geometry broke on toggle.
   - `toggleGutter()` re-runs layout — the gutter moves the left edge by 64px.
 
+### Task 4: Header alignment
+- ✓ DONE — `th:not([align])` is left-aligned, matching GitHub
+  - github-markdown-css never sets `text-align` on `th`, so a table written `|---|` fell through to the UA default of `center` and printed centred headers over left-aligned data. A table written `|:---|` looked right, which is why only one of the two showed it.
+  - The `:not([align])` guard matters: marked writes declared alignment as an `align` attribute, and a presentational attribute loses to any author rule — a bare `th { text-align: left }` would silently override every `:---:` in the document.
+
 ## Delta: PDF Export Fidelity
 
 ### Task 1: Verify export against a real WebKit print run
-- TODO — Export both `examples/test.md` and a reference-heavy document, confirm the rendering
-  - Everything so far is verified in Chrome via a repro harness; WebKit's own print layout has not been checked since the last round of changes.
-  - Check: no clipping at the right margin, tables not sprawling, header rows repeating.
+- ✓ DONE — `marq file.md --export-pdf out.pdf` exports headlessly and quits, so export is scriptable
+  - The previous round was verified only in Chrome. Worse, the PDFs being judged came from an app instance launched before the print-layout work: the template is read once at launch, so a running Marq keeps rendering with the template it started with.
+  - Verified by rasterising the PDF and reading character bounds out of it with PDFKit, rather than by eye.
 
 ### Task 2: Pelican section page break
 - IN PROGRESS — Large blank area before the pelican image grid
@@ -56,8 +64,24 @@
   - Second theory if that fails: WebKit reserves the SVGs' intrinsic height during pagination while painting them scaled, in which case no break rule helps and explicit image sizing is needed.
 
 ### Task 3: Confirm CSS px to points mapping
-- TODO — Swift passes the printable area to `layoutTablesForPrint(width, height)` in points
-  - Assumes CSS px map 1:1 to points in the print view at scale 1. If wrong, tables will not quite fill the page width.
+- ✓ DONE — They do not map 1:1. WebKit lays a print job out 1.25x larger than the paper and shrinks it
+  - Measured with probe elements in the printed PDF: `width: 400px` printed 320.25pt, `width: 100%` printed the full 523pt. So 523pt of paper is 653 CSS px of layout.
+  - Passing points straight through laid every table out a fifth too narrow and shrank table text to fit a width that was never the constraint — the reference table hit the 60% floor where 73% fits.
+  - `layoutTablesForPrint` now takes points and applies `PRINT_SHRINK_FACTOR`; print column widths are percentages and the content column is pinned to the printable width while measuring, so measurement matches the page that gets printed.
+
+### Task 6: Print font scale solved in one step, so minimums did not fit
+- ✓ DONE — `fitTableFontForPrint` now measures at the scale it is considering and refines
+  - A column's minimum does not scale with the font: padding and borders are fixed pixels, 11px per column, 66px across six. Solving `scale = avail / neededAtFullSize` therefore overshoots — a scale meant to bring the minimums to 640px left them at 662.
+  - The allocator then handed every column ~1.4% less than its longest word, and the narrowest header printed as "Manifes/t" in a column that looked roomy.
+  - A second, separate cause of the same symptom: `allocateForPrint` floored columns at *exactly* their measured minimum, and shares the surplus by content volume — so the narrow columns sat on their floor with no tolerance, and the print renderer sets the same text a shade wider than the screen measurement of it. `PRINT_COLUMN_SLACK` (3%) now pads the floor, and `fitTableFontForPrint` targets `avail / PRINT_COLUMN_SLACK` so the two agree.
+  - Fixing only the first cause moved the break from the reference table's "Manifest" to the prose table's "Status" — the symptom is one column landing a hair short, and there was more than one way to land there.
+  - Separately: pinning `#content` to the printable width did nothing at first — `flex: 1` grew it straight back. Measurement was happening at ~1060px for a 653px page.
+
+### Task 5: Header row can be orphaned at the foot of a page
+- TODO — A table starting near the page bottom prints its header alone, with the first row overleaf
+  - WebKit honours `thead { display: table-header-group }` but ignores `break-after: avoid` on `thead`, `break-inside: avoid` on `tr`, and the same on `td`/`th` — all three tried and measured, none changed the break.
+  - `tbody tr:first-child { break-before: avoid }` does change it, for the worse: the header is kept on the page and the first row is split mid-cell instead.
+  - The remaining option is a JS heuristic: estimate each table's offset in the paginated flow and set `break-before: page` when its header would land in the last stretch of a page. Fragile — the estimate has to track every other break rule — so it is not obviously worth it.
 
 ### Task 4: Respect system page setup
 - TODO — Margins are hard-coded to 36pt in `generatePDF`
@@ -125,6 +149,19 @@ Screen and paper need different splits. On screen the surplus is large and an eq
 ### Print font scaling
 
 A table's text area falls roughly with the square of the font size, which makes font size a far stronger lever on page count than any reallocation of column widths. Tables scale down when too wide for the paper, and again when too tall, floored at 60% of body size.
+
+### Verifying an export
+
+`marq file.md --export-pdf out.pdf` renders, exports and quits. Judge the result
+by measurement, not by eye: PDFKit's `page.characterBounds(at:)` gives per-glyph
+rectangles in points, so "does the table fill the measure" is a number, and a
+probe element of known CSS width printed into the page gives the px-to-point
+factor directly. Two rounds of wrong conclusions came from eyeballing renders —
+a table that looked full width was 80% of it.
+
+The template is read once, at launch. A running Marq keeps using the template it
+started with, so verifying against an app instance that has been open all session
+tests code that is no longer on disk.
 
 ### Testing gotchas
 
