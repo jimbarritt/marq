@@ -82,6 +82,44 @@
         align-self: flex-start;
     }
 
+    /* Tables.
+       github-markdown-css sizes tables with `display: block; width: max-content;
+       max-width: 100%`. WebKit does not clamp a max-content block against
+       max-width, so wide tables run off the page instead of wrapping. Size them
+       as real tables and let layoutTables() assign the column widths. */
+    .markdown-body table {
+        display: table;
+        width: 100%;
+        max-width: 100%;
+        table-layout: auto;
+        overflow: visible;
+    }
+
+    .markdown-body table td,
+    .markdown-body table th {
+        vertical-align: top;
+        overflow-wrap: break-word;
+    }
+
+    /* Tables break out of the 980px prose measure and use the full window
+       width. markdown-body starts at 32px body padding + 48px gutter + 16px
+       gutter margin = 96px, leaving 32px of padding on the right. */
+    .table-wrapper {
+        width: calc(100vw - 128px);
+        max-width: calc(100vw - 128px);
+        overflow-x: auto;
+        margin-bottom: 16px;
+    }
+
+    #line-gutter.hidden ~ .markdown-body .table-wrapper {
+        width: calc(100vw - 64px);
+        max-width: calc(100vw - 64px);
+    }
+
+    .table-wrapper > table {
+        margin-bottom: 0 !important;
+    }
+
     /* Top-right toolbar */
     .toolbar {
         position: fixed;
@@ -447,9 +485,135 @@ function renderWithLineNumbers(src) {
     return parts.join('');
 }
 
+// --- Table layout -------------------------------------------------------
+//
+// Browsers' automatic table layout shares surplus width in proportion to how
+// much each column *could* use, so a single long prose column starves every
+// short one and they all wrap. We measure the columns ourselves and hand out
+// widths max-min fair instead: any column that fits within an equal share gets
+// exactly its content width, and the columns that want more split what is left.
+
+// Measure each column at `mode` ('max-content' or 'min-content') by laying out
+// a hidden clone. The clone stays inside #content so it inherits the same
+// border and padding rules as the real table.
+function measureColumns(table, mode) {
+    const clone = table.cloneNode(true);
+    const cols = clone.querySelector('colgroup.marq-cols');
+    if (cols) cols.remove();
+    clone.removeAttribute('style');
+    clone.style.cssText = 'display:table; table-layout:auto; width:' + mode + '; max-width:none;';
+
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute; visibility:hidden; left:-99999px; top:0; width:0; height:0; overflow:hidden;';
+    host.appendChild(clone);
+    document.getElementById('content').appendChild(host);
+
+    const row = clone.rows[0];
+    const widths = [];
+    if (row) {
+        for (let i = 0; i < row.cells.length; i++) {
+            widths.push(row.cells[i].getBoundingClientRect().width);
+        }
+    }
+    host.remove();
+    return widths;
+}
+
+function maxMinFairWidths(max, min, avail) {
+    const n = max.length;
+    const fixed = new Array(n).fill(false);
+    const widths = new Array(n).fill(0);
+    let budget = avail;
+    let remaining = n;
+
+    // Repeat: any column narrower than an equal share of what is left is
+    // satisfied outright, which frees more room for the columns still growing.
+    let changed = true;
+    while (changed && remaining > 0) {
+        changed = false;
+        const share = budget / remaining;
+        for (let i = 0; i < n; i++) {
+            if (!fixed[i] && max[i] <= share) {
+                fixed[i] = true;
+                widths[i] = max[i];
+                budget -= max[i];
+                remaining--;
+                changed = true;
+            }
+        }
+    }
+
+    if (remaining > 0) {
+        const share = budget / remaining;
+        for (let i = 0; i < n; i++) {
+            if (!fixed[i]) widths[i] = Math.max(share, min[i]);
+        }
+    }
+    return widths;
+}
+
+function sizeTableColumns(table, wrapper) {
+    const head = table.rows[0];
+    if (!head) return;
+    const n = head.cells.length;
+    const avail = wrapper.clientWidth;
+    if (!avail) return;
+
+    const max = measureColumns(table, 'max-content');
+    if (max.length !== n) return;
+    const natural = max.reduce(function(a, b) { return a + b; }, 0);
+    if (!natural) return;
+
+    let widths;
+    if (natural <= avail) {
+        // Nothing needs to wrap — widen every column proportionally so the
+        // table still fills the window.
+        widths = max.map(function(w) { return w + (avail - natural) * (w / natural); });
+    } else {
+        widths = maxMinFairWidths(max, measureColumns(table, 'min-content'), avail);
+    }
+
+    const old = table.querySelector('colgroup.marq-cols');
+    if (old) old.remove();
+    const group = document.createElement('colgroup');
+    group.className = 'marq-cols';
+    widths.forEach(function(w) {
+        const col = document.createElement('col');
+        col.style.width = w.toFixed(2) + 'px';
+        group.appendChild(col);
+    });
+    table.insertBefore(group, table.firstChild);
+
+    table.style.tableLayout = 'fixed';
+    table.style.width = widths.reduce(function(a, b) { return a + b; }, 0).toFixed(2) + 'px';
+}
+
+function layoutTables() {
+    const content = document.getElementById('content');
+    content.querySelectorAll('table').forEach(function(table) {
+        let wrapper = table.parentElement;
+        if (!wrapper || !wrapper.classList.contains('table-wrapper')) {
+            wrapper = document.createElement('div');
+            wrapper.className = 'table-wrapper';
+            table.parentNode.insertBefore(wrapper, table);
+            wrapper.appendChild(table);
+        }
+        sizeTableColumns(table, wrapper);
+    });
+}
+
+let tableLayoutTimer = null;
+window.addEventListener('resize', function() {
+    clearTimeout(tableLayoutTimer);
+    tableLayoutTimer = setTimeout(function() {
+        layoutTables();
+        buildGutter();
+    }, 100);
+});
+
 function renderMarkdown(md, resetScroll) {
     rawMarkdown = md;
-    clearSearch();
+    clearSearch(true);
 
     const content = document.getElementById('content');
     content.innerHTML = renderWithLineNumbers(md);
@@ -486,7 +650,7 @@ function renderMarkdown(md, resetScroll) {
 
     // Initial gutter build; ResizeObserver below handles all subsequent rebuilds
     // (font load, async highlight, image load, window resize, etc.)
-    requestAnimationFrame(function() { buildGutter(); });
+    requestAnimationFrame(function() { layoutTables(); buildGutter(); });
 
     // Reset scroll again once images finish loading (they shift content).
     // Gutter rebuild is handled by ResizeObserver.
@@ -796,13 +960,16 @@ function closeSearch() {
     clearSearch();
 }
 
-function clearSearch() {
+// skipRestore is set by renderMarkdown, which is about to replace the content
+// wholesale and would otherwise pay to lay out the outgoing document's tables.
+function clearSearch(skipRestore) {
     searchMatches = [];
     currentMatchIndex = -1;
     document.getElementById('search-count').textContent = '';
     // Restore original HTML to remove highlights
-    if (originalHTML) {
+    if (originalHTML && !skipRestore) {
         document.getElementById('content').innerHTML = originalHTML;
+        layoutTables();
     }
 }
 
@@ -880,6 +1047,9 @@ function performSearch(query) {
 
     // Re-collect marks in document order
     searchMatches = Array.from(content.querySelectorAll('mark.search-highlight'));
+
+    // The restore above dropped the wrappers and column widths.
+    layoutTables();
 
     if (searchMatches.length > 0) {
         currentMatchIndex = 0;
