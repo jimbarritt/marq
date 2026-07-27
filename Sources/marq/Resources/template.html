@@ -109,6 +109,26 @@
         margin-bottom: 16px;
     }
 
+    /* Applied while laying out for export. Not inside @media print: the
+       measurement and the layout both have to see it, and measurement happens
+       on screen. Lets a cell break inside a word so a column holding a long
+       identifier or URL can still fit a page. */
+    body.marq-printing .markdown-body table td,
+    body.marq-printing .markdown-body table th {
+        overflow-wrap: anywhere;
+        /* Screen padding is 6px 13px. Across six columns that is 156px of a
+           523pt page — nearly a third of it — so tighten it for paper. */
+        padding: 3px 5px;
+    }
+
+    /* Set only while measuring how much room a table would want if words were
+       not broken. With `anywhere` in force every column's minimum is a single
+       character, which says nothing about whether the table really fits. */
+    body.marq-printing.marq-measuring .markdown-body table td,
+    body.marq-printing.marq-measuring .markdown-body table th {
+        overflow-wrap: normal;
+    }
+
     .table-wrapper > table {
         margin-bottom: 0 !important;
     }
@@ -273,6 +293,34 @@
         background: #fdac54;
     }
 
+    /* Link destination, shown on hover like a browser's status bar */
+    #link-status {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        z-index: 2000;
+        max-width: 60vw;
+        padding: 3px 8px;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        border-left: none;
+        border-bottom: none;
+        border-top-right-radius: 6px;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 11px;
+        color: #656d76;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.1s;
+    }
+
+    #link-status.visible {
+        opacity: 1;
+    }
+
     /* Mermaid diagrams */
     .mermaid {
         text-align: center;
@@ -292,6 +340,7 @@
         #line-gutter,
         #help-overlay,
         #search-overlay,
+        #link-status,
         .code-copy-btn {
             display: none !important;
         }
@@ -305,42 +354,12 @@
             max-width: none;
         }
 
-        /* layoutTables() sizes tables in pixels against the *window*, which is
-           meaningless on paper and overflows it. Hand the columns back to the
-           browser for print. These need !important to beat the inline styles
-           and the generated <col> widths. */
+        /* Column widths are set by layoutTablesForPrint() against the real
+           printable width, so nothing here should override them. The wrapper
+           only needs to stop being a scroll container — paper has no
+           scrollbar, and anything overflowing it would simply be clipped. */
         .table-wrapper {
-            width: auto !important;
-            max-width: 100% !important;
             overflow-x: visible !important;
-        }
-
-        .markdown-body table {
-            width: 100% !important;
-            table-layout: auto !important;
-            font-size: 90%;
-        }
-
-        .marq-cols col {
-            width: auto !important;
-        }
-
-        /* A wide table can have a min-content width greater than the paper, and
-           print has no scrollbar to fall back on — it simply clips at the right
-           margin. `anywhere` (unlike `break-word`) reduces the intrinsic minimum
-           width, so auto layout can shrink a column enough to fit.
-           Applied only to the columns layoutTables() identified as absorbing
-           slack: allowing every column to break collapses the short ones to one
-           character per line. The short columns keep a normal minimum, so auto
-           layout cannot squeeze them below their longest word. */
-        .markdown-body table td,
-        .markdown-body table th {
-            overflow-wrap: normal;
-        }
-
-        .markdown-body table td.marq-flow,
-        .markdown-body table th.marq-flow {
-            overflow-wrap: anywhere;
         }
 
         /* On screen a long code line scrolls sideways; on paper it would just
@@ -356,6 +375,18 @@
         .markdown-body img {
             max-width: 100% !important;
             height: auto;
+        }
+
+        /* A long table should flow across pages, breaking between rows. Say so
+           explicitly: the wrapper is a scroll container on screen, and a
+           container that establishes its own formatting context is easily
+           treated as one unbreakable block, which strands it whole on the next
+           page and leaves most of a page empty. */
+        .table-wrapper,
+        .markdown-body table,
+        tbody {
+            break-inside: auto;
+            page-break-inside: auto;
         }
 
         /* Keep blocks whole across page breaks where we can. */
@@ -423,6 +454,8 @@
     <article class="markdown-body" id="content"></article>
 </div>
 
+<div id="link-status" aria-hidden="true"></div>
+
 <script>
 // Raw markdown storage
 let rawMarkdown = '';
@@ -440,6 +473,34 @@ document.addEventListener('click', function(e) {
         e.preventDefault();
         window.webkit.messageHandlers.navigate.postMessage(href);
     }
+});
+
+// Show a link's destination on hover, the way a browser status bar does.
+// Relative links keep their authored form; the resolved file:// URL would be a
+// long absolute path that tells the reader nothing useful.
+const linkStatus = document.getElementById('link-status');
+
+function linkDestination(link) {
+    const href = link.getAttribute('href') || '';
+    if (href.startsWith('#')) return href;
+    if (href.startsWith('http://') || href.startsWith('https://')) return href;
+    return href;
+}
+
+document.addEventListener('mouseover', function(e) {
+    const link = e.target.closest && e.target.closest('a');
+    if (!link || !link.getAttribute('href')) return;
+    linkStatus.textContent = linkDestination(link);
+    linkStatus.classList.add('visible');
+});
+
+document.addEventListener('mouseout', function(e) {
+    const link = e.target.closest && e.target.closest('a');
+    if (!link) return;
+    // Ignore moves within the same link (e.g. across a nested <code>).
+    const to = e.relatedTarget;
+    if (to && to.closest && to.closest('a') === link) return;
+    linkStatus.classList.remove('visible');
 });
 
 // Search state
@@ -596,8 +657,12 @@ function measureColumns(table, mode) {
     const clone = table.cloneNode(true);
     const cols = clone.querySelector('colgroup.marq-cols');
     if (cols) cols.remove();
+    // Keep any font scale the print path applied — dropping it would measure the
+    // columns at a size the table is not going to be rendered at.
+    const fontSize = table.style.fontSize;
     clone.removeAttribute('style');
-    clone.style.cssText = 'display:table; table-layout:auto; width:' + mode + '; max-width:none;';
+    clone.style.cssText = 'display:table; table-layout:auto; width:' + mode + '; max-width:none;'
+        + (fontSize ? ' font-size:' + fontSize + ';' : '');
 
     const host = document.createElement('div');
     host.style.cssText = 'position:absolute; visibility:hidden; left:-99999px; top:0; width:0; height:0; overflow:hidden;';
@@ -645,9 +710,61 @@ function maxMinFairWidths(max, min, avail) {
             if (!fixed[i]) widths[i] = Math.max(share, min[i]);
         }
     }
-    // `satisfied` marks the columns that got their full content width. The rest
-    // are the ones absorbing the slack, which print layout needs to know about.
+    // `satisfied` marks the columns that got their full content width.
     return { widths: widths, satisfied: fixed };
+}
+
+// Paper needs a different split from the screen.
+//
+// On screen there is surplus width, and giving every unsatisfied column an equal
+// share looks tidy. On a page the remainder is small, and an equal split is the
+// worst choice available: a one-sentence column and a four-paragraph column end
+// up the same width, so the long one runs many times taller and the table
+// sprawls across pages.
+//
+// Instead, floor every column at its natural minimum — the longest word, not the
+// one-character minimum that word breaking allows — and share what is left in
+// proportion to how much each column actually holds. That evens up the number of
+// lines per column, which is what keeps the table short. fitTableFontForPrint()
+// has already scaled the text so the natural minimums fit.
+function allocateForPrint(max, naturalMin, budget) {
+    const n = max.length;
+    const minSum = naturalMin.reduce(function(a, b) { return a + b; }, 0);
+
+    let widths;
+    if (minSum >= budget) {
+        // Even unbroken minimums do not fit. The font scale is floored, so this
+        // is reachable; fall back to the minimums and let the normalisation
+        // below bring them inside the page, breaking words where it must.
+        widths = naturalMin.slice();
+    } else {
+        const slack = budget - minSum;
+        let want = 0;
+        for (let i = 0; i < n; i++) want += Math.max(0, max[i] - naturalMin[i]);
+        widths = want
+            ? naturalMin.map(function(m, i) {
+                  return m + slack * (Math.max(0, max[i] - naturalMin[i]) / want);
+              })
+            : naturalMin.map(function(m) { return m + slack / n; });
+    }
+
+    // Never hand back more than the page: paper has no scrollbar, so anything
+    // over the budget is simply lost off the right edge.
+    const total = widths.reduce(function(a, b) { return a + b; }, 0);
+    if (total > budget) {
+        const k = budget / total;
+        widths = widths.map(function(w) { return w * k; });
+    }
+    return widths;
+}
+
+// Column widths as they would be with words unbroken. Used both to decide the
+// print font scale and to floor the print allocation.
+function measureNaturalMin(table) {
+    document.body.classList.add('marq-measuring');
+    const widths = measureColumns(table, 'min-content');
+    document.body.classList.remove('marq-measuring');
+    return widths;
 }
 
 // How wide a table may be: from the left edge of the content column to the
@@ -661,15 +778,62 @@ function maxMinFairWidths(max, min, avail) {
 // scrollX is added back to keep the result stable when the page is scrolled
 // horizontally; without it a scrolled page would widen the table further and
 // feed back on itself.
+// Set while exporting: the printable width in CSS px, supplied by the Swift
+// side because only it knows the paper size and margins.
+let printWidthOverride = null;
+let printHeightOverride = null;
+
+// Smallest the table text may be scaled to. Below roughly 60% of body size the
+// table stops being readable, and a few extra pages is the better trade.
+const MIN_PRINT_TABLE_SCALE = 0.6;
+
 function availableTableWidth() {
+    if (printWidthOverride) return printWidthOverride;
     const content = document.getElementById('content');
     const left = content.getBoundingClientRect().left + window.scrollX;
     const padRight = parseFloat(getComputedStyle(document.body).paddingRight) || 0;
     return Math.max(0, Math.floor(document.documentElement.clientWidth - left - padRight));
 }
 
-function allocateColumns(max, min, budget) {
+// Re-run the normal allocation against the paper width instead of the window.
+//
+// Letting print fall back to the browser's automatic table layout does not work:
+// which columns are "short" is decided relative to a wide window, and at A4 that
+// classification is meaningless — columns holding long identifiers or URLs eat
+// the page and the prose columns collapse. Running the same max-min fair
+// allocation against the real printable width sizes every column on the terms
+// that actually apply on paper.
+//
+// The .marq-printing class lets cells break inside words, which lowers their
+// minimum width enough to fit a narrow page. It is applied before measuring so
+// the measurement matches the layout it is used for. It cannot collapse columns
+// the way it did under auto layout, because here the widths are explicit.
+function layoutTablesForPrint(widthPx, heightPx) {
+    document.body.classList.add('marq-printing');
+    printWidthOverride = Math.max(1, Math.floor(widthPx));
+    printHeightOverride = heightPx ? Math.max(1, Math.floor(heightPx)) : null;
+    layoutTables();
+    return true;
+}
+
+function restoreTableLayoutAfterPrint() {
+    document.body.classList.remove('marq-printing');
+    printWidthOverride = null;
+    printHeightOverride = null;
+    document.querySelectorAll('#content table').forEach(function(t) {
+        t.style.fontSize = '';
+    });
+    layoutTables();
+    buildGutter();
+    return true;
+}
+
+function allocateColumns(max, min, budget, table) {
     const natural = max.reduce(function(a, b) { return a + b; }, 0);
+    if (printWidthOverride !== null && natural > budget) {
+        const widths = allocateForPrint(max, measureNaturalMin(table), budget);
+        return { widths: widths, satisfied: widths.map(function() { return false; }) };
+    }
     if (natural <= budget) {
         // Nothing needs to wrap — widen every column proportionally so the
         // table still fills the window.
@@ -681,6 +845,38 @@ function allocateColumns(max, min, budget) {
     return maxMinFairWidths(max, min(), budget);
 }
 
+// A table whose columns cannot all fit the paper even at their minimum widths
+// will be broken mid-word in every column. Shrinking the text shrinks those
+// minimums, so scale the font down just enough to fit — floored, because past a
+// point the table is unreadable anyway and a few broken words are the better
+// trade. Only ever shrinks: tables that already fit are left alone.
+function fitTableFontForPrint(table, avail) {
+    table.style.fontSize = '';
+    const min = measureNaturalMin(table);
+    const needed = min.reduce(function(a, b) { return a + b; }, 0);
+    if (needed > avail && avail > 0) {
+        return Math.max(MIN_PRINT_TABLE_SCALE, avail / needed);
+    }
+    return 1;
+}
+
+function applyTableScale(table, scale) {
+    table.style.fontSize = scale < 1 ? (scale * 100).toFixed(1) + '%' : '';
+}
+
+// How much further to shrink a table that is simply too tall.
+//
+// Width has its own scale, above; this is about the page count. A table's text
+// area falls roughly with the square of the font size — smaller text fits more
+// characters per line *and* uses shorter lines — so the scale needed to reach a
+// target height is about the square root of the height ratio. That makes font
+// size a far stronger lever on length than any reallocation of column widths.
+function scaleToFitHeight(currentScale, height, target) {
+    if (!target || height <= target) return currentScale;
+    const wanted = currentScale * Math.sqrt(target / height);
+    return Math.max(MIN_PRINT_TABLE_SCALE, Math.min(currentScale, wanted));
+}
+
 function sizeTableColumns(table, wrapper) {
     const head = table.rows[0];
     if (!head) return;
@@ -689,32 +885,52 @@ function sizeTableColumns(table, wrapper) {
     if (!avail) return;
     wrapper.style.width = avail + 'px';
 
-    const max = measureColumns(table, 'max-content');
-    if (max.length !== n) return;
-    if (!max.reduce(function(a, b) { return a + b; }, 0)) return;
+    let scale = printWidthOverride ? fitTableFontForPrint(table, avail) : 1;
+    if (printWidthOverride) applyTableScale(table, scale);
 
-    // min-content is only needed when the columns can't all be satisfied, and
-    // it costs a second hidden layout pass, so it's measured lazily and cached.
-    let minCache = null;
-    const min = function() {
-        if (!minCache) minCache = measureColumns(table, 'min-content');
-        return minCache;
+    // Lay the table out at the current scale. Returns the rendered height so the
+    // caller can decide whether it needs to shrink further.
+    const layoutAtCurrentScale = function() {
+        const max = measureColumns(table, 'max-content');
+        if (max.length !== n) return null;
+        if (!max.reduce(function(a, b) { return a + b; }, 0)) return null;
+
+        // min-content is only needed when the columns can't all be satisfied,
+        // and it costs a second hidden layout pass, so measure it lazily.
+        let minCache = null;
+        const min = function() {
+            if (!minCache) minCache = measureColumns(table, 'min-content');
+            return minCache;
+        };
+
+        // A table with collapsed borders renders slightly wider than the sum of
+        // its columns — half an outer border on each side. One pixel is enough
+        // to trip `overflow-x: auto` and leave a scrollbar parked under every
+        // table. Rather than hard-code the overshoot, allocate, measure what
+        // actually rendered, and if it spills, give back the excess and go again.
+        let budget = avail;
+        for (let pass = 0; pass < 2; pass++) {
+            const alloc = allocateColumns(max, min, budget, table);
+            applyColumnWidths(table, alloc.widths, alloc.satisfied);
+
+            const sum = alloc.widths.reduce(function(a, b) { return a + b; }, 0);
+            const overshoot = Math.ceil(table.getBoundingClientRect().width - sum);
+            if (overshoot <= 0 || sum + overshoot <= avail) break;
+            budget = avail - overshoot;
+        }
+        return table.getBoundingClientRect().height;
     };
 
-    // A table with collapsed borders renders slightly wider than the sum of its
-    // columns — half an outer border on each side. One pixel is enough to trip
-    // `overflow-x: auto` and leave a scrollbar parked under every table. Rather
-    // than hard-code the overshoot, allocate, measure what actually rendered,
-    // and if it spills, give back exactly the excess and allocate once more.
-    let budget = avail;
-    for (let pass = 0; pass < 2; pass++) {
-        const alloc = allocateColumns(max, min, budget);
-        applyColumnWidths(table, alloc.widths, alloc.satisfied);
+    const height = layoutAtCurrentScale();
+    if (height === null || !printHeightOverride) return;
 
-        const sum = alloc.widths.reduce(function(a, b) { return a + b; }, 0);
-        const overshoot = Math.ceil(table.getBoundingClientRect().width - sum);
-        if (overshoot <= 0 || sum + overshoot <= avail) break;
-        budget = avail - overshoot;
+    // Too tall for a page: shrink the text and lay it out again. One correction
+    // is enough — the estimate is close, and iterating to convergence would cost
+    // several more full measurement passes for a barely different result.
+    const smaller = scaleToFitHeight(scale, height, printHeightOverride);
+    if (smaller < scale - 0.01) {
+        applyTableScale(table, smaller);
+        layoutAtCurrentScale();
     }
 }
 
@@ -729,17 +945,6 @@ function applyColumnWidths(table, widths, satisfied) {
         group.appendChild(col);
     });
     table.insertBefore(group, table.firstChild);
-
-    // Tag the cells of columns that are absorbing slack. Print layout hands
-    // sizing back to the browser, and only these columns may break words to
-    // make the table fit the paper — see the print rules. Without the
-    // distinction the short columns collapse to one character per line.
-    for (let r = 0; r < table.rows.length; r++) {
-        const cells = table.rows[r].cells;
-        for (let c = 0; c < cells.length && c < satisfied.length; c++) {
-            cells[c].classList.toggle('marq-flow', !satisfied[c]);
-        }
-    }
 
     table.style.tableLayout = 'fixed';
     table.style.width = widths.reduce(function(a, b) { return a + b; }, 0).toFixed(2) + 'px';

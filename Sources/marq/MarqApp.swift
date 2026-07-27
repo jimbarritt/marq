@@ -355,32 +355,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         info.leftMargin = 36
         info.rightMargin = 36
 
-        let operation = webView.printOperation(with: info)
-        operation.showsPrintPanel = false
-        operation.showsProgressPanel = false
-        // The print operation lays the web view out at this size, so it must be
-        // the printable area rather than whatever the window happens to be.
-        operation.view?.frame = NSRect(
-            x: 0,
-            y: 0,
-            width: info.paperSize.width - info.leftMargin - info.rightMargin,
-            height: info.paperSize.height - info.topMargin - info.bottomMargin
-        )
+        let printableWidth = info.paperSize.width - info.leftMargin - info.rightMargin
+        let printableHeight = info.paperSize.height - info.topMargin - info.bottomMargin
 
-        if let window = webView.window {
-            operation.runModal(
-                for: window,
-                delegate: self,
-                didRun: #selector(pdfExportDidRun(_:success:contextInfo:)),
-                contextInfo: nil
-            )
-        } else {
-            operation.run()
-            log("PDF exported to: \(url.path)")
+        // Tables are sized in pixels against the window, which is meaningless on
+        // paper. Re-run the layout against the printable width before handing
+        // the view to the print system, then restore it afterwards.
+        webView.evaluateJavaScript("layoutTablesForPrint(\(printableWidth), \(printableHeight));") { [weak self] _, error in
+            guard let self = self else { return }
+            if let error = error {
+                self.log("Error preparing tables for print: \(error)")
+            }
+
+            let operation = self.webView.printOperation(with: info)
+            operation.showsPrintPanel = false
+            operation.showsProgressPanel = false
+            // The print operation lays the web view out at this size, so it must
+            // be the printable area rather than the window size.
+            operation.view?.frame = NSRect(x: 0, y: 0, width: printableWidth, height: printableHeight)
+
+            if let window = self.webView.window {
+                operation.runModal(
+                    for: window,
+                    delegate: self,
+                    didRun: #selector(self.pdfExportDidRun(_:success:contextInfo:)),
+                    contextInfo: nil
+                )
+            } else {
+                operation.run()
+                self.log("PDF exported to: \(url.path)")
+                self.restoreAfterPrint()
+            }
         }
     }
 
+    func restoreAfterPrint() {
+        webView.evaluateJavaScript("restoreTableLayoutAfterPrint();", completionHandler: nil)
+    }
+
     @objc func pdfExportDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        restoreAfterPrint()
         if success {
             log("PDF exported successfully")
         } else {
@@ -486,6 +500,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension AppDelegate: WKNavigationDelegate {
+    // Without this, clicking an external link navigates the web view itself to
+    // the site, replacing the rendered document — and didFinish then tries to
+    // inject markdown into a page that has no renderMarkdown. External links
+    // belong in the user's browser, so cancel the navigation and hand them over.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard navigationAction.navigationType == .linkActivated,
+              let url = navigationAction.request.url else {
+            decisionHandler(.allow)
+            return
+        }
+
+        if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            log("Opening external link: \(url.absoluteString)")
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+
+        decisionHandler(.allow)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         log("WebView navigation finished")
         loadAndInject()
