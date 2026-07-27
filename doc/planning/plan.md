@@ -24,7 +24,7 @@
 | [Delta: Links and Navigation](#delta-links-and-navigation) | [1. Open external links in the browser](#task-1-open-external-links-in-the-browser) | ✓ DONE |
 | | [2. Link destination status bar](#task-2-link-destination-status-bar) | ✓ DONE |
 | | [3. Verify internal anchor links in the app](#task-3-verify-internal-anchor-links-in-the-app) | ✓ DONE |
-| | [4. Back does not undo an anchor jump](#task-4-back-does-not-undo-an-anchor-jump) | TODO |
+| | [4. Back does not undo an anchor jump](#task-4-back-does-not-undo-an-anchor-jump) | ✓ DONE |
 | [Delta: Release 1.2.9](#delta-release-129) | [1. Commit and push outstanding work](#task-1-commit-and-push-outstanding-work) | ✓ DONE |
 | | [2. Publish 1.2.9](#task-2-publish-129) | ✓ DONE |
 | [Delta: Zoom Controls](#delta-zoom-controls) | [1. Cmd-+ / Cmd-- / Cmd-0 to change text size](#task-1-cmd---cmd---cmd-0-to-change-text-size) | ✓ DONE |
@@ -103,10 +103,13 @@
 - ✓ DONE — Anchors jump correctly in the app, without reloading the document
 
 ### Task 4: Back does not undo an anchor jump
-- TODO — Follow a link to a section and Back cannot return you to where you were reading
-  - History is a Swift-side list of *file paths* (`history`/`historyIndex` in `MarqApp.swift`), pushed in `loadAndInject` and walked by `navigateBack`. An anchor jump never changes the file, so nothing is pushed and Back has nothing to go back to — it either does nothing or, if the document was reached by a link, jumps out of the file entirely, which is worse.
-  - So this is not a bug in the anchor handling: the history model has no concept of a position within a document.
-  - The fix is to record scroll positions as well as paths — push the current offset before an anchor jump, and have Back restore an offset when the entry is a position rather than a file. Note `renderMarkdown(md, resetScroll)` already takes a flag for whether to reset scroll, which is the hook for restoring one.
+- ✓ DONE — History entries are positions (`HistoryEntry { path, scrollY }`), not bare file paths
+  - The template now intercepts `#` links itself rather than leaving them to WebKit: it scrolls, then posts the from/to offsets over a new `anchor` message handler, and `recordAnchorJump` pushes the entry. Swift owns the history, so the jump has to be reported to it.
+  - `openEntry` short-circuits when the entry is in the current file — restoring the offset *is* the navigation. Reloading would discard the position and flash the document.
+  - `withCurrentScroll` stamps the live offset onto the current entry before every navigation, so this also fixes the older annoyance that Back out of a linked document returned you to the top of the previous file rather than to where you were reading.
+  - `restoreScroll(y)` re-applies after images load — a late image shifts everything below it, so a single scroll lands near the right place rather than at it.
+  - Anchor hrefs are percent-encoded, so `anchorTarget` decodes before `getElementById`: a heading like "Café" arrives as `#caf%C3%A9`.
+  - Verified with a temporary `--selftest-nav` harness driving the real click handler: anchor 400→929, Back→400, Forward→929, then a cross-file link to `pirates.md` and Back→`test.md@929`. Removed afterwards.
 
 ## Delta: Release 1.2.9
 

@@ -18,8 +18,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var pendingExportPath: String?   // --export-pdf <path>, exported then quit
     var isHeadlessExport = false
     var rawMarkdown: String = ""
-    var history: [String] = []
+    // History is a list of *positions*, not files. An anchor jump does not change
+    // the file, so a list of paths has nothing to push and Back either does
+    // nothing or leaves the document entirely — which is worse than nothing.
+    struct HistoryEntry {
+        var path: String
+        var scrollY: Double
+    }
+    var history: [HistoryEntry] = []
     var historyIndex: Int = -1
+    var pendingScrollRestore: Double?
     var pendingOpenFile: String?
     var statusLabel: NSTextField!
     var statusBar: NSView!
@@ -66,6 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let contentController = WKUserContentController()
         contentController.add(self, name: "navigate")
         contentController.add(self, name: "openFile")
+        contentController.add(self, name: "anchor")
         config.userContentController = contentController
 
         log("Creating WKWebView")
@@ -290,7 +299,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Push initial file to history
         if !filePath.isEmpty {
-            history = [filePath]
+            history = [HistoryEntry(path: filePath, scrollY: 0)]
             historyIndex = 0
             let fileName = URL(fileURLWithPath: filePath).lastPathComponent
             window.title = "\(fileName) — Marq"
@@ -306,40 +315,77 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusLabel?.stringValue = path
     }
 
-    func navigateTo(_ path: String, addToHistory: Bool = true) {
-        fileWatcher?.stop()
-        filePath = path
-
-        if addToHistory {
-            // Trim forward history
-            if historyIndex < history.count - 1 {
-                history = Array(history[0...historyIndex])
+    // Every navigation records where the reader was before it moves them, so
+    // Back returns to that spot rather than to the top of the file.
+    func withCurrentScroll(_ body: @escaping () -> Void) {
+        webView.evaluateJavaScript("window.scrollY") { [weak self] result, _ in
+            guard let self = self else { return }
+            if self.historyIndex >= 0, self.historyIndex < self.history.count,
+               let y = result as? Double {
+                self.history[self.historyIndex].scrollY = y
             }
-            history.append(path)
-            historyIndex = history.count - 1
+            body()
+        }
+    }
+
+    func navigateTo(_ path: String, addToHistory: Bool = true) {
+        guard addToHistory else {
+            openEntry(HistoryEntry(path: path, scrollY: 0))
+            return
+        }
+        withCurrentScroll { [weak self] in
+            guard let self = self else { return }
+            // Trim forward history
+            if self.historyIndex < self.history.count - 1 {
+                self.history = Array(self.history[0...self.historyIndex])
+            }
+            self.history.append(HistoryEntry(path: path, scrollY: 0))
+            self.historyIndex = self.history.count - 1
+            self.openEntry(self.history[self.historyIndex])
+        }
+    }
+
+    // Move to a history entry. Within the same document this is an anchor jump,
+    // and restoring the offset *is* the whole navigation — reloading would throw
+    // the position away and flash the document for no reason.
+    func openEntry(_ entry: HistoryEntry) {
+        if entry.path == filePath && !filePath.isEmpty {
+            webView.evaluateJavaScript("restoreScroll(\(entry.scrollY));", completionHandler: nil)
+            return
         }
 
-        let fileName = URL(fileURLWithPath: path).lastPathComponent
-        window.title = "\(fileName) — marq"
-        updateStatusBar(path: path)
+        fileWatcher?.stop()
+        filePath = entry.path
 
-        resetScrollOnNextInject = true
+        let fileName = URL(fileURLWithPath: entry.path).lastPathComponent
+        window.title = "\(fileName) — marq"
+        updateStatusBar(path: entry.path)
+
+        resetScrollOnNextInject = entry.scrollY == 0
+        pendingScrollRestore = entry.scrollY == 0 ? nil : entry.scrollY
         loadAndInject()
         startWatching()
     }
 
+    // An anchor jump is handled in the page — the file never changes — so the
+    // template reports where it went and the entry is pushed here.
+    func recordAnchorJump(from: Double, to: Double) {
+        guard historyIndex >= 0, historyIndex < history.count else { return }
+        history[historyIndex].scrollY = from
+        if historyIndex < history.count - 1 {
+            history = Array(history[0...historyIndex])
+        }
+        history.append(HistoryEntry(path: filePath, scrollY: to))
+        historyIndex = history.count - 1
+    }
+
     @objc func navigateBack() {
         guard historyIndex > 0 else { return }
-        historyIndex -= 1
-        let path = history[historyIndex]
-        fileWatcher?.stop()
-        filePath = path
-        let fileName = URL(fileURLWithPath: path).lastPathComponent
-        window.title = "\(fileName) — marq"
-        updateStatusBar(path: path)
-        resetScrollOnNextInject = true
-        loadAndInject()
-        startWatching()
+        withCurrentScroll { [weak self] in
+            guard let self = self else { return }
+            self.historyIndex -= 1
+            self.openEntry(self.history[self.historyIndex])
+        }
     }
 
     @objc func reloadFile() {
@@ -392,16 +438,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func navigateForward() {
         guard historyIndex < history.count - 1 else { return }
-        historyIndex += 1
-        let path = history[historyIndex]
-        fileWatcher?.stop()
-        filePath = path
-        let fileName = URL(fileURLWithPath: path).lastPathComponent
-        window.title = "\(fileName) — marq"
-        updateStatusBar(path: path)
-        resetScrollOnNextInject = true
-        loadAndInject()
-        startWatching()
+        withCurrentScroll { [weak self] in
+            guard let self = self else { return }
+            self.historyIndex += 1
+            self.openEntry(self.history[self.historyIndex])
+        }
     }
 
     @objc func exportPDF() {
@@ -579,6 +620,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.log("JS ERROR: \(error)")
             } else {
                 self?.log("Markdown injected successfully")
+                // Back into a *different* file lands at the offset the reader
+                // left it at. restoreScroll re-applies after images load, which
+                // is when the content stops moving under them.
+                if let y = self?.pendingScrollRestore {
+                    self?.pendingScrollRestore = nil
+                    self?.webView.evaluateJavaScript("restoreScroll(\(y));", completionHandler: nil)
+                }
                 self?.runPendingExportIfAny()
             }
         }
@@ -666,6 +714,14 @@ extension AppDelegate: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "openFile" {
             openFileDialog()
+            return
+        }
+        if message.name == "anchor" {
+            guard let body = message.body as? [String: Any],
+                  let from = body["from"] as? Double,
+                  let to = body["to"] as? Double else { return }
+            log("Anchor jump: \(Int(from)) -> \(Int(to))")
+            recordAnchorJump(from: from, to: to)
             return
         }
         guard message.name == "navigate", let href = message.body as? String else { return }

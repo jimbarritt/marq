@@ -479,14 +479,57 @@ document.addEventListener('click', function(e) {
     if (!link) return;
     const href = link.getAttribute('href');
     if (!href) return;
-    // Skip external links and anchors
-    if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('#')) return;
+    // Skip external links
+    if (href.startsWith('http://') || href.startsWith('https://')) return;
+    // Anchors are handled in the page, but Swift owns the history, so the jump
+    // is performed here and reported rather than left to the default behaviour.
+    if (href.startsWith('#')) {
+        const target = anchorTarget(href);
+        if (!target) return;   // dangling anchor — let the browser do nothing
+        e.preventDefault();
+        const from = window.scrollY;
+        target.scrollIntoView();
+        window.webkit.messageHandlers.anchor.postMessage({ from: from, to: window.scrollY });
+        return;
+    }
     // Navigate to relative markdown file via Swift
     if (href.endsWith('.md') || href.endsWith('.markdown')) {
         e.preventDefault();
         window.webkit.messageHandlers.navigate.postMessage(href);
     }
 });
+
+// Resolve an anchor href to its element. The id is percent-encoded in the href
+// — marked's slugs keep non-ASCII characters, so a heading like "Café" arrives
+// as "#caf%C3%A9" and getElementById would miss it undecoded.
+function anchorTarget(href) {
+    const raw = href.slice(1);
+    let id = raw;
+    try { id = decodeURIComponent(raw); } catch (e) { /* malformed escape — use as authored */ }
+    return document.getElementById(id)
+        || document.getElementById(raw)
+        || document.getElementsByName(id)[0]
+        || null;
+}
+
+// Restore a scroll offset, then again once images have loaded. An image that
+// arrives late shifts everything below it, so a single scroll lands the reader
+// somewhere near where they were rather than where they were.
+function restoreScroll(y) {
+    window.scrollTo(0, y);
+    const images = document.getElementById('content').querySelectorAll('img');
+    let pending = 0;
+    images.forEach(function(img) {
+        if (img.complete) return;
+        pending++;
+        const onDone = function() {
+            pending--;
+            if (pending === 0) window.scrollTo(0, y);
+        };
+        img.addEventListener('load', onDone);
+        img.addEventListener('error', onDone);
+    });
+}
 
 // Show a link's destination on hover, the way a browser status bar does.
 // Relative links keep their authored form; the resolved file:// URL would be a
