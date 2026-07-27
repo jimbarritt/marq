@@ -2,55 +2,23 @@
 
 ## What's Next
 
-- **Next:** Task 5 — orphaned table header at a page foot (Delta: PDF Export Fidelity). Needs a decision, not a fix: CSS cannot do it, so it is a JS pagination heuristic or nothing.
+- **Next:** Task 5 — Header row can be orphaned at the foot of a page (Delta: PDF Export Fidelity)
 - **Sub-doc:** (none)
-- **Blockers:** None — zoom controls are built, and the key equivalents are confirmed working in the app
-- **Context:** See [Checkpoint: Session 2026-07-27 (evening)](#checkpoint-session-2026-07-27-evening)
+- **Blockers:** None
+- **Context:** See [Checkpoint: Session 2026-07-27 (late evening)](#checkpoint-session-2026-07-27-late-evening)
 
 ## Summary
 
 | Delta | Task | Status |
 |-------|------|--------|
-| [Delta: Table Layout](#delta-table-layout) | [1. Replace GitHub max-content table sizing](#task-1-replace-github-max-content-table-sizing) | ✓ DONE |
-| | [2. Fair column width allocation](#task-2-fair-column-width-allocation) | ✓ DONE |
-| | [3. Full-width tables and gutter tracking](#task-3-full-width-tables-and-gutter-tracking) | ✓ DONE |
-| | [4. Header alignment](#task-4-header-alignment) | ✓ DONE |
 | [Delta: PDF Export Fidelity](#delta-pdf-export-fidelity) | [1. Verify export against a real WebKit print run](#task-1-verify-export-against-a-real-webkit-print-run) | ✓ DONE |
 | | [2. Pelican section page break](#task-2-pelican-section-page-break) | IN PROGRESS |
 | | [3. Confirm CSS px to points mapping](#task-3-confirm-css-px-to-points-mapping) | ✓ DONE |
 | | [4. Respect system page setup](#task-4-respect-system-page-setup) | TODO |
 | | [5. Header row can be orphaned at the foot of a page](#task-5-header-row-can-be-orphaned-at-the-foot-of-a-page) | TODO |
 | | [6. Print font scale solved in one step](#task-6-print-font-scale-solved-in-one-step-so-minimums-did-not-fit) | ✓ DONE |
-| [Delta: Links and Navigation](#delta-links-and-navigation) | [1. Open external links in the browser](#task-1-open-external-links-in-the-browser) | ✓ DONE |
-| | [2. Link destination status bar](#task-2-link-destination-status-bar) | ✓ DONE |
-| | [3. Verify internal anchor links in the app](#task-3-verify-internal-anchor-links-in-the-app) | ✓ DONE |
-| | [4. Back does not undo an anchor jump](#task-4-back-does-not-undo-an-anchor-jump) | ✓ DONE |
-| [Delta: Release 1.2.9](#delta-release-129) | [1. Commit and push outstanding work](#task-1-commit-and-push-outstanding-work) | ✓ DONE |
-| | [2. Publish 1.2.9](#task-2-publish-129) | ✓ DONE |
-| [Delta: Zoom Controls](#delta-zoom-controls) | [1. Cmd-+ / Cmd-- / Cmd-0 to change text size](#task-1-cmd---cmd---cmd-0-to-change-text-size) | ✓ DONE |
 
-## Delta: Table Layout
-
-### Task 1: Replace GitHub max-content table sizing
-- ✓ DONE — Tables lay out as real tables instead of `display: block; width: max-content`
-  - WebKit does not clamp a max-content block against `max-width`; Blink does. Wide tables ran off the page in Marq while looking correct in Chrome.
-  - Cells also set `vertical-align: top` — github-markdown-css never overrides the `middle` default.
-
-### Task 2: Fair column width allocation
-- ✓ DONE — `layoutTables()` measures columns and allocates max-min fair
-  - Browser auto layout shares surplus in proportion to `max-content − min-content`, so one prose column starves every short one.
-  - Measurement uses a hidden clone inside `#content` so it inherits the same border and padding cascade.
-  - A second pass gives back any overshoot from collapsed borders — 1px was enough to leave a scrollbar parked under every table.
-
-### Task 3: Full-width tables and gutter tracking
-- ✓ DONE — Tables break out of the 980px prose measure and track the gutter
-  - `availableTableWidth()` measures from the content column's left edge rather than `calc(100vw - …)`; `100vw` includes the scrollbar and hard-coding the gutter geometry broke on toggle.
-  - `toggleGutter()` re-runs layout — the gutter moves the left edge by 64px.
-
-### Task 4: Header alignment
-- ✓ DONE — `th:not([align])` is left-aligned, matching GitHub
-  - github-markdown-css never sets `text-align` on `th`, so a table written `|---|` fell through to the UA default of `center` and printed centred headers over left-aligned data. A table written `|:---|` looked right, which is why only one of the two showed it.
-  - The `:not([align])` guard matters: marked writes declared alignment as an `align` attribute, and a presentational attribute loses to any author rule — a bare `th { text-align: left }` would silently override every `:---:` in the document.
+Archived Deltas: see the [archive index](archive/index.md)
 
 ## Delta: PDF Export Fidelity
 
@@ -89,48 +57,19 @@
   - Fixing only the first cause moved the break from the reference table's "Manifest" to the prose table's "Status" — the symptom is one column landing a hair short, and there was more than one way to land there.
   - Separately: pinning `#content` to the printable width did nothing at first — `flex: 1` grew it straight back. Measurement was happening at ~1060px for a 653px page.
 
-## Delta: Links and Navigation
+## Checkpoint: Session 2026-07-27 (late evening)
 
-### Task 1: Open external links in the browser
-- ✓ DONE — Added `decidePolicyFor` to cancel `http(s)` link navigations and hand them to `NSWorkspace`
-  - Previously WebKit navigated itself to the URL, replacing the document, then `didFinish` tried to inject markdown into a page with no `renderMarkdown`.
+**What was completed this session:**
+- Zoom controls: View menu driving `webView.pageZoom` over fixed steps, a local event monitor for bare Cmd-=, level persisted, and export pinned to 1.0.
+- Internal navigation: history entries became positions rather than file paths, so Back undoes an anchor jump — and also returns you to your reading position when coming back out of a linked document.
 
-### Task 2: Link destination status bar
-- ✓ DONE — `#link-status` shows the destination bottom-left on hover
-  - Shows the authored href; a relative `.md` link resolves to a long absolute `file://` path that tells the reader nothing.
+**State of the project:**
+Both open items in Delta: Zoom Controls and Delta: Links and Navigation are closed and verified. Uncommitted: `MarqApp.swift`, `template.html`, `plan.md`. Released version is still 1.2.9, so neither feature is in the tap yet.
 
-### Task 3: Verify internal anchor links in the app
-- ✓ DONE — Anchors jump correctly in the app, without reloading the document
-
-### Task 4: Back does not undo an anchor jump
-- ✓ DONE — History entries are positions (`HistoryEntry { path, scrollY }`), not bare file paths
-  - The template now intercepts `#` links itself rather than leaving them to WebKit: it scrolls, then posts the from/to offsets over a new `anchor` message handler, and `recordAnchorJump` pushes the entry. Swift owns the history, so the jump has to be reported to it.
-  - `openEntry` short-circuits when the entry is in the current file — restoring the offset *is* the navigation. Reloading would discard the position and flash the document.
-  - `withCurrentScroll` stamps the live offset onto the current entry before every navigation, so this also fixes the older annoyance that Back out of a linked document returned you to the top of the previous file rather than to where you were reading.
-  - `restoreScroll(y)` re-applies after images load — a late image shifts everything below it, so a single scroll lands near the right place rather than at it.
-  - Anchor hrefs are percent-encoded, so `anchorTarget` decodes before `getElementById`: a heading like "Café" arrives as `#caf%C3%A9`.
-  - Verified with a temporary `--selftest-nav` harness driving the real click handler: anchor 400→929, Back→400, Forward→929, then a cross-file link to `pirates.md` and Back→`test.md@929`. Removed afterwards.
-
-## Delta: Release 1.2.9
-
-### Task 1: Commit and push outstanding work
-- ✓ DONE — Committed as `3d08307` "Fixed the tables"
-
-### Task 2: Publish 1.2.9
-- ✓ DONE — Released from `3d08307`, tap cask updated to 1.2.9
-  - 1.2.8 was cut from `1728a08`, an hour before the print-layout work landed, so it shipped with the export bugs and is superseded.
-  - `just publish` builds, releases to GitHub, updates the tap, then waits for SPACE before pushing the cask.
-
-## Delta: Zoom Controls
-
-### Task 1: Cmd-+ / Cmd-- / Cmd-0 to change text size
-- ✓ DONE — View menu with Zoom In / Zoom Out / Actual Size, driving `webView.pageZoom`
-  - `pageZoom` over a CSS font-size variable: it scales the in-page chrome (gutter, search box) along with the prose, which is what zoom means to a reader, and the native status bar sits outside the web view so it stays put. It also preserves the 980px measure in CSS px, so zooming in shortens the line rather than lengthening it — Safari's behaviour.
-  - Fixed steps (0.5 … 3.0) rather than a multiplier, so Cmd-- after Cmd-+ returns to exactly 100%.
-  - Cmd-= needs a local event monitor. Cmd-+ is Cmd-Shift-= on most layouts, and the bare Cmd-= people actually press cannot be a second menu item: key equivalent matching skips hidden items.
-  - Zoom is applied before the first load, so a restored level lays out once rather than reflowing after the window appears.
-  - Measured: `printOperation(with:)` ignores `pageZoom` — an export at 175% is identical to one at 100%, down to the glyph bounds. `generatePDF` pins zoom to 1.0 anyway, so a future WebKit that starts honouring it cannot silently scale exports.
-  - Verification gotcha: the `.build` binary has no bundle identifier, so `UserDefaults.standard` writes to a domain that isn't `com.jimbarritt.marq`. Two rounds of "the PDF is unchanged" proved nothing, because the zoom was never applied — passing `-textZoom N` on the command line (argument domain) is the way to test it, and the value arrives as a *string*, so it needs `integer(forKey:)` rather than `object(forKey:) as? Int`.
+**Immediate next priorities:**
+1. Orphaned table header at a page foot (PDF Export Fidelity, Task 5) — a decision, not a fix.
+2. The pelican page break (PDF Export Fidelity, Task 2), still IN PROGRESS with an unverified theory.
+3. Respect system page setup (PDF Export Fidelity, Task 4).
 
 ## Checkpoint: Session 2026-07-27 (evening)
 

@@ -101,6 +101,13 @@
         overflow-wrap: break-word;
     }
 
+    /* github-markdown-css stripes even rows (#f6f8fa), the way GitHub itself
+       does. Overridden here rather than edited out of the vendored file, so the
+       stylesheet stays a clean drop-in on the next update. */
+    .markdown-body table tr:nth-child(2n) {
+        background-color: transparent;
+    }
+
     /* A header with no alignment declared in the markdown gets the UA default,
        which is `center` — github-markdown-css never says otherwise, so a plain
        `|---|` table came out with centred headers over left-aligned data. GitHub
