@@ -50,17 +50,19 @@ Here's some *italic*, **bold**, ~~strikethrough~~, and `inline code`.
 
 ## Table
 
-The long `Notes` column exercises table column sizing: the short columns should
-each sit on a single line while `Notes` takes up the slack, and the whole table
-should stay within the window and grow as the window widens.
+A deliberately awkward six-column table for exercising column sizing. The first
+three columns hold a word or two each and should never wrap; `Summary` takes a
+short paragraph, `Detail` a longer one, and `Log` several paragraphs. Between
+them they should fill the window without a horizontal scrollbar, and grow as the
+window widens. On export the whole table must fit the paper width.
 
-| Feature | Status | Shortcut | Notes |
-|---------|--------|----------|-------|
-| Markdown rendering | Done | `r` | Using marked.js. Avast ye scurvy dogs, hoist the mainsail afore the parrot pilfers the last of the hardtack, for the tide waits on no buccaneer and the reef be closer than the bosun reckons. Yo ho ho and a bottle of rum, says the quartermaster, though the bottle be long empty and the rum longer gone. |
-| Syntax highlighting | Done | `h` | highlight.js. Blimey, the cap'n be three sheets to the wind again and the crow's nest stands empty while we drift towards the shoals of Tortuga. Splice the mainbrace and batten down the hatches, lest the squall take the topgallant and the cook's best kettle with it. |
-| Mermaid diagrams | Done | `m` | mermaid.js. Shiver me timbers, there be a kraken off the larboard bow, and nary a cannon loaded nor a powder monkey sober enough to load one. Dead men tell no tales, but the ship's log tells plenty, and this one speaks of a mutiny brewing below decks. |
-| Math/LaTeX | Done | `x` | MathJax. Arrr, fifteen men on a dead man's chest, and every last one of them arguing over the reckoning of the longitude, which no soul aboard can compute without the chronometer that went over the side in the last blow. |
-| Vim navigation | Done | `j/k/gg/G/Ctrl-D/U` | Walk the plank, ye bilge rat, for the black spot has been passed and the articles be clear on the matter. Weigh anchor and hoist the colours, we make for the Spanish Main by first light with whatever crew still draws breath. |
+| Feature | Status | Key | Summary | Detail | Log |
+|---------|--------|-----|---------|--------|-----|
+| Rendering | Done | `r` | Avast ye scurvy dogs, the mainsail be hoisted. | Hoist the mainsail afore the parrot pilfers the last of the hardtack, for the tide waits on no buccaneer and the reef be closer than the bosun reckons by half a league. | Yo ho ho and a bottle of rum, says the quartermaster, though the bottle be long empty and the rum longer gone.<br><br>The cap'n took one look at the reckoning and declared it the work of a landlubber, which it were, on account of the navigator having been pressed into service from a bakery in Bristol.<br><br>By the second watch we had run out of both biscuit and patience, and the parrot had begun repeating things it had no business repeating.<br><br>We made landfall at dawn with nothing to show for it but a torn topsail and a chart that proved, on closer inspection, to be a menu. |
+| Highlighting | Done | `h` | Blimey, the cap'n be three sheets to the wind. | The crow's nest stands empty while we drift towards the shoals of Tortuga, and not a soul aboard has the heart to wake him for it. | Splice the mainbrace and batten down the hatches, lest the squall take the topgallant and the cook's best kettle with it.<br><br>The cook, for his part, has threatened mutiny over the kettle twice this voyage, and the articles say nothing whatsoever about kettles.<br><br>The bosun ruled in the cook's favour, which surprised everyone, not least the cook. |
+| Diagrams | Done | `m` | Shiver me timbers, there be a kraken to larboard. | Nary a cannon loaded nor a powder monkey sober enough to load one, and the beast circling closer with every turn of the glass. | Dead men tell no tales, but the ship's log tells plenty, and this one speaks of a mutiny brewing below decks.<br><br>The kraken, it turned out, was a quantity of kelp and a trick of the light, though nobody was minded to say so out loud until well after supper.<br><br>The powder monkey has since been promoted, on the grounds that he was the only one who stayed asleep throughout.<br><br>The kelp was not mentioned again.<br><br>Neither was the promotion. |
+| Math | Done | `x` | Arrr, fifteen men on a dead man's chest. | Every last one of them arguing over the reckoning of the longitude, which no soul aboard can compute without the chronometer. | The chronometer went over the side in the last blow, along with the spare compass and the second mate's dignity.<br><br>We have been navigating by argument ever since, which is slower than dead reckoning but considerably more entertaining.<br><br>Land was sighted on the ninth day, in entirely the wrong ocean. |
+| Navigation | Done | `j/k/gg/G` | Walk the plank, ye bilge rat, the black spot be passed. | The articles be clear on the matter, and clearer still on what befalls them as argue with the articles at this hour of the night. | Weigh anchor and hoist the colours, we make for the Spanish Main by first light with whatever crew still draws breath.<br><br>Of the original complement of forty, some twenty-two remain, and of those perhaps twelve can be relied upon to pull in the same direction at the same time.<br><br>The remainder are accounted for in the ledger under a heading the purser declines to explain.<br><br>The purser has been declining to explain that heading since Cadiz. |
 
 ## Code Blocks
 

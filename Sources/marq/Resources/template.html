@@ -318,10 +318,29 @@
         .markdown-body table {
             width: 100% !important;
             table-layout: auto !important;
+            font-size: 90%;
         }
 
         .marq-cols col {
             width: auto !important;
+        }
+
+        /* A wide table can have a min-content width greater than the paper, and
+           print has no scrollbar to fall back on — it simply clips at the right
+           margin. `anywhere` (unlike `break-word`) reduces the intrinsic minimum
+           width, so auto layout can shrink a column enough to fit.
+           Applied only to the columns layoutTables() identified as absorbing
+           slack: allowing every column to break collapses the short ones to one
+           character per line. The short columns keep a normal minimum, so auto
+           layout cannot squeeze them below their longest word. */
+        .markdown-body table td,
+        .markdown-body table th {
+            overflow-wrap: normal;
+        }
+
+        .markdown-body table td.marq-flow,
+        .markdown-body table th.marq-flow {
+            overflow-wrap: anywhere;
         }
 
         /* On screen a long code line scrolls sideways; on paper it would just
@@ -626,7 +645,9 @@ function maxMinFairWidths(max, min, avail) {
             if (!fixed[i]) widths[i] = Math.max(share, min[i]);
         }
     }
-    return widths;
+    // `satisfied` marks the columns that got their full content width. The rest
+    // are the ones absorbing the slack, which print layout needs to know about.
+    return { widths: widths, satisfied: fixed };
 }
 
 // How wide a table may be: from the left edge of the content column to the
@@ -652,7 +673,10 @@ function allocateColumns(max, min, budget) {
     if (natural <= budget) {
         // Nothing needs to wrap — widen every column proportionally so the
         // table still fills the window.
-        return max.map(function(w) { return w + (budget - natural) * (w / natural); });
+        return {
+            widths: max.map(function(w) { return w + (budget - natural) * (w / natural); }),
+            satisfied: max.map(function() { return true; })
+        };
     }
     return maxMinFairWidths(max, min(), budget);
 }
@@ -684,17 +708,17 @@ function sizeTableColumns(table, wrapper) {
     // and if it spills, give back exactly the excess and allocate once more.
     let budget = avail;
     for (let pass = 0; pass < 2; pass++) {
-        const widths = allocateColumns(max, min, budget);
-        applyColumnWidths(table, widths);
+        const alloc = allocateColumns(max, min, budget);
+        applyColumnWidths(table, alloc.widths, alloc.satisfied);
 
-        const sum = widths.reduce(function(a, b) { return a + b; }, 0);
+        const sum = alloc.widths.reduce(function(a, b) { return a + b; }, 0);
         const overshoot = Math.ceil(table.getBoundingClientRect().width - sum);
         if (overshoot <= 0 || sum + overshoot <= avail) break;
         budget = avail - overshoot;
     }
 }
 
-function applyColumnWidths(table, widths) {
+function applyColumnWidths(table, widths, satisfied) {
     const old = table.querySelector('colgroup.marq-cols');
     if (old) old.remove();
     const group = document.createElement('colgroup');
@@ -705,6 +729,17 @@ function applyColumnWidths(table, widths) {
         group.appendChild(col);
     });
     table.insertBefore(group, table.firstChild);
+
+    // Tag the cells of columns that are absorbing slack. Print layout hands
+    // sizing back to the browser, and only these columns may break words to
+    // make the table fit the paper — see the print rules. Without the
+    // distinction the short columns collapse to one character per line.
+    for (let r = 0; r < table.rows.length; r++) {
+        const cells = table.rows[r].cells;
+        for (let c = 0; c < cells.length && c < satisfied.length; c++) {
+            cells[c].classList.toggle('marq-flow', !satisfied[c]);
+        }
+    }
 
     table.style.tableLayout = 'fixed';
     table.style.width = widths.reduce(function(a, b) { return a + b; }, 0).toFixed(2) + 'px';
