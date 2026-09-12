@@ -21,7 +21,7 @@ run-local *FLAGS:
     if echo "{{FLAGS}}" | grep -q -- "--debug"; then
         .build/debug/marq examples/test.md
     else
-        nohup .build/debug/marq examples/test.md &>/dev/null &
+        nohup .build/debug/marq examples/test.md --harness-run &>/dev/null &
     fi
 
 ### Harness ###################################################################
@@ -43,13 +43,13 @@ harness_dir := ".harness"
 #
 # Metrics for the screen layout, as JSON.
 probe FILE="examples/test.md" WIDTH="960": _build
-    @.build/debug/marq {{FILE}} --width {{WIDTH}} --dump-metrics - --timeout 60 2>/dev/null
+    @.build/debug/marq {{FILE}} --width {{WIDTH}} --dump-metrics - --timeout 60 --harness-run 2>/dev/null
 
 # Column widths, font scale and broken words as they will print.
 #
 # Measures the A4 page without exporting anything.
 probe-print FILE="examples/test.md": _build
-    @.build/debug/marq {{FILE}} --dump-metrics - --print --timeout 60 2>/dev/null
+    @.build/debug/marq {{FILE}} --dump-metrics - --print --timeout 60 --harness-run 2>/dev/null
 
 # Just the headline: anything listed here is a bug.
 problems FILE="examples/test.md": _build
@@ -58,7 +58,7 @@ problems FILE="examples/test.md": _build
     for mode in screen print; do
         flag=""; [ "$mode" = print ] && flag="--print"
         echo "== $mode"
-        .build/debug/marq {{FILE}} --width 960 --dump-metrics - $flag --timeout 60 2>/dev/null \
+        .build/debug/marq {{FILE}} --width 960 --dump-metrics - $flag --timeout 60 --harness-run 2>/dev/null \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d["problems"], indent=2)); print("tables:", [(t["index"], t["fillPct"], t["fontScale"]) for t in d["tables"]])'
     done
 
@@ -68,7 +68,7 @@ shot FILE="examples/test.md" WIDTH="960": _build
     set -euo pipefail
     mkdir -p {{harness_dir}}
     OUT="{{harness_dir}}/$(basename {{FILE}} .md).png"
-    .build/debug/marq {{FILE}} --width {{WIDTH}} --export-png "$OUT" --timeout 60 2>/dev/null
+    .build/debug/marq {{FILE}} --width {{WIDTH}} --export-png "$OUT" --timeout 60 --harness-run 2>/dev/null
     echo "$OUT"
 
 # Export a PDF and report its shape. Prints the path.
@@ -77,7 +77,7 @@ pdf FILE="examples/test.md": _build
     set -euo pipefail
     mkdir -p {{harness_dir}}
     OUT="{{harness_dir}}/$(basename {{FILE}} .md).pdf"
-    .build/debug/marq {{FILE}} --export-pdf "$OUT" --timeout 90 2>/dev/null
+    .build/debug/marq {{FILE}} --export-pdf "$OUT" --timeout 90 --harness-run 2>/dev/null
     .build/debug/pdftool info "$OUT" | python3 -c '
     import json, sys
     d = json.load(sys.stdin)
@@ -115,11 +115,33 @@ bless *FIXTURES: _build
 
 # Headless runs carry a watchdog; a binary started by hand does not.
 #
+# Matches on the --harness-run tag in argv, not on the executable path: the
+# runaway that wrote 17 GB survived its `pkill` because it had been started as
+# `./marq` from a cd'd shell and the pattern was matching a full path. Anything
+# this repo launches carries the tag however it is invoked. An untagged
+# hand-started binary is still only findable by path, so both are tried — and
+# whatever is left is listed rather than silently missed.
+#
 # Kill anything left running.
 kill-probes:
     #!/usr/bin/env bash
-    pkill -f '.build/debug/marq' 2>/dev/null && echo "killed debug marq" || echo "no debug marq running"
-    pgrep -fl 'marq|pdftool' || true
+    killed=0
+    for pattern in '--harness-run' '\.build/debug/(marq|pdftool)'; do
+        if pkill -f -- "$pattern" 2>/dev/null; then
+            echo "killed: $pattern"
+            killed=1
+        fi
+    done
+    [ "$killed" = 0 ] && echo "nothing running"
+    sleep 0.3
+    # Anything still here was not started by this repo. Say so rather than
+    # reporting a clean sweep — and never touch an installed /Applications Marq.
+    leftover=$(pgrep -fl 'marq|pdftool' | grep -v '^[0-9]* *pgrep' || true)
+    if [ -n "$leftover" ]; then
+        echo "still running (not started by the harness — left alone):"
+        echo "$leftover"
+    fi
+    exit 0
 
 _build:
     @swift build >&2
@@ -176,8 +198,9 @@ _build-icon:
     iconutil -c icns "$ICONSET" -o build/AppIcon.icns
     echo "Built build/AppIcon.icns"
 
-# Build and zip for distribution (unsigned)
-package: bundle _zip
+# Build and zip for distribution (unsigned). Depends on `check` because two
+# releases in a row shipped layout regressions that a human found by eye later.
+package: check bundle _zip
     @echo "Ready: build/{{app_name}}.zip"
     @shasum -a 256 "build/{{app_name}}.zip"
 

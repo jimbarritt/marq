@@ -1221,7 +1221,7 @@ function marqMetrics(widthPt, heightPt) {
 // of instrument that proves nothing: it disagrees with itself depending on how
 // warm the font cache is, and a recorded baseline taken on a cold cache fails
 // forever after.
-async function marqMetricsWhenSettled(widthPt, heightPt) {
+async function marqSettle() {
     await document.fonts.ready;
     await Promise.all(Array.from(document.images)
         .filter(function(img) { return !img.complete; })
@@ -1229,6 +1229,11 @@ async function marqMetricsWhenSettled(widthPt, heightPt) {
             return new Promise(function(resolve) { img.onload = img.onerror = resolve; });
         }));
     layoutTables();
+    return true;
+}
+
+async function marqMetricsWhenSettled(widthPt, heightPt) {
+    await marqSettle();
     return marqMetrics(widthPt, heightPt);
 }
 

@@ -29,6 +29,10 @@ WORK = ROOT / ".harness" / "check"
 
 FIXTURES = ["examples/test.md", "examples/anchor-test.md"]
 
+# Tags every process this script launches, so `just kill-probes` can find one
+# that outlived its watchdog by argument rather than by executable path.
+TAG = "--harness-run"
+
 # Screen metrics are only meaningful at a stated width — the whole table
 # allocation is a function of the available measure.
 WIDTH = 960
@@ -79,9 +83,9 @@ def measure(fixture):
     printed = WORK / f"{name}.print.json"
     pdf = WORK / f"{name}.pdf"
 
-    run([MARQ, fixture, "--width", str(WIDTH), "--dump-metrics", screen])
-    run([MARQ, fixture, "--width", str(WIDTH), "--dump-metrics", printed, "--print"])
-    run([MARQ, fixture, "--export-pdf", pdf])
+    run([MARQ, fixture, "--width", str(WIDTH), "--dump-metrics", screen, TAG])
+    run([MARQ, fixture, "--width", str(WIDTH), "--dump-metrics", printed, "--print", TAG])
+    run([MARQ, fixture, "--export-pdf", pdf, TAG])
     info = run([PDFTOOL, "info", pdf], capture_json=True)
 
     widths = [p.get("textWidthPt", 0) for p in info["pages"]]

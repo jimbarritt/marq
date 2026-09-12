@@ -15,6 +15,8 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
       --width N, --height N   window size, so a measurement is reproducible
       --settle SECONDS        how long to let the document settle (default 1.5)
       --timeout SECONDS       watchdog for headless runs (default 60, 0 disables)
+      --harness-run           no-op tag so `just kill-probes` can find this
+                              process by argument rather than by path
 
     See `just --list` for the recipes built on these.
     """)

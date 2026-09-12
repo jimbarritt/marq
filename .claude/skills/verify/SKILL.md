@@ -87,3 +87,8 @@ Run it before saying a layout change is done. If the change is intended,
 - **Clean up.** Headless runs carry a watchdog (`--timeout`, 60s default), but
   anything launched by hand does not: `just kill-probes`. A print job with no
   supervisor once ran 42 minutes at 100% CPU and wrote a 17 GB file.
+- **If you launch the app yourself, pass `--harness-run`.** `kill-probes` finds
+  processes by that tag rather than by executable path — the 17 GB job survived
+  its `pkill` because it was started as `./marq` from a `cd`'d shell and the
+  pattern was matching a path it no longer had. Untagged, your process is only
+  findable if you happen to launch it the way the pattern expects.

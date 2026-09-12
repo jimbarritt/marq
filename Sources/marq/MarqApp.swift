@@ -28,6 +28,11 @@ struct CLIOptions {
     var height: CGFloat?
     var settle: Double = 1.5      // seconds to let mermaid/KaTeX/images stop moving
     var timeout: Double = 60      // headless watchdog; 0 disables
+    var harnessRun = false        // tag in argv so kill-probes can find us
+
+    /// Every harness-launched process carries this, so it can be found and
+    /// killed by argument rather than by executable path. See the parser.
+    static let harnessTag = "--harness-run"
 
     var isHeadless: Bool { exportPDF != nil || exportPNG != nil || dumpMetrics != nil }
 
@@ -49,6 +54,15 @@ struct CLIOptions {
             case "--height":       o.height = value().flatMap(Double.init).map { CGFloat($0) }
             case "--settle":       o.settle = value().flatMap(Double.init) ?? o.settle
             case "--timeout":      o.timeout = value().flatMap(Double.init) ?? o.timeout
+            // Does nothing here, and that is the point: it is a tag in argv so
+            // `just kill-probes` can find harness processes by what they were
+            // asked to do rather than by the path they were launched from. A
+            // path pattern is what let a runaway print job survive its `pkill`
+            // — it had been started as `./marq` from a cd'd shell, and the
+            // pattern was matching the full path. It then ran 42 minutes at
+            // 100% CPU and wrote a 17 GB file. argv[1...] is untouched however
+            // the binary is invoked; argv[0] is not (main.swift rewrites it).
+            case CLIOptions.harnessTag: o.harnessRun = true
             // NSApplication reads its own arguments; -key value pairs land in the
             // argument domain of UserDefaults and are not ours to interpret.
             case let a where a.hasPrefix("-") && a.count > 1:
@@ -707,21 +721,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // from the markdown-injected callback, which happens on every reload — so
     // the guard matters.
     //
-    // The settle delay is not politeness: mermaid, KaTeX and images all resolve
-    // after renderMarkdown returns, and measuring in the same turn measures a
-    // document that is still changing under the ruler.
+    // The settle delay is not politeness: mermaid and KaTeX resolve after
+    // renderMarkdown returns, and measuring in the same turn measures a document
+    // that is still changing under the ruler. The delay is followed by
+    // marqSettle(), which waits on web fonts and images — a PNG or PDF taken
+    // before the fonts load is set in fallback metrics, and it looks fine, which
+    // is the trap: the export differs from the identical run a minute later.
+    // Only one action runs per invocation, in this order of precedence.
     func runHeadlessTaskIfAny() {
         guard options.isHeadless, !headlessStarted else { return }
         headlessStarted = true
         DispatchQueue.main.asyncAfter(deadline: .now() + options.settle) {
-            if let out = self.options.dumpMetrics {
-                self.dumpMetrics(to: out)
-            } else if let out = self.options.exportPNG {
-                self.exportPNG(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
-            } else if let out = self.options.exportPDF {
-                self.isHeadlessExport = true
-                self.log("Exporting to \(out)")
-                self.generatePDF(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
+            self.webView.callAsyncJavaScript(
+                "return await marqSettle();", arguments: [:], in: nil, in: .page
+            ) { _ in
+                if let out = self.options.dumpMetrics {
+                    self.dumpMetrics(to: out)
+                } else if let out = self.options.exportPNG {
+                    self.exportPNG(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
+                } else if let out = self.options.exportPDF {
+                    self.isHeadlessExport = true
+                    self.log("Exporting to \(out)")
+                    self.generatePDF(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
+                }
             }
         }
     }

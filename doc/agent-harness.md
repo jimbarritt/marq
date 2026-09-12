@@ -50,6 +50,11 @@ marq FILE --settle S --timeout S
 `--print` reports the page without exporting anything, which turns "will this
 table fit, and at what scale" into a four-second question.
 
+One action runs per invocation — metrics, then PNG, then PDF, in that order of
+precedence — and every headless action waits for web fonts and images to settle
+before it measures or captures anything. Headless runs always measure at 100%
+zoom, whatever the reader last zoomed the app to.
+
 ### 2. `pdftool` measures the exported PDF
 
 A second executable in the same package (`Sources/pdftool`), so `swift build`
@@ -86,6 +91,10 @@ copied into `.build/.../marq_marq.bundle` at build time, and the template is
 read once at launch, so a Marq that has been open all session is rendering code
 that is no longer on disk. Two separate sessions lost time to exactly that.
 
+Recipe outputs land in `.harness/`, which is gitignored — each recipe prints the
+path it wrote. `just package` depends on `just check`, so a release cannot be
+cut over a failing baseline.
+
 ### 4. Golden baselines
 
 `just check` compares each fixture's metrics to `tests/baselines/`: table shape,
@@ -100,13 +109,47 @@ The baselines record only what should be stable. Exact pixel heights are
 deliberately excluded: they move with any typographic change and would make the
 check noise.
 
+**Adding a fixture:** put the markdown file in `examples/`, add its path to
+`FIXTURES` in `tools/check-metrics.py`, and run `just bless`. A fixture earns
+its place by exercising a case the existing ones do not — `test.md` is the
+stress corpus (six-column tables, long identifiers, images, maths), and
+`anchor-test.md` covers a table-free document. There is, for instance, no
+fixture yet that places a table header near a page foot, which is what the
+orphaned-header work needs as its test bed.
+
 ### 5. Supervision
 
 Every headless run carries a watchdog, 60 seconds by default. It runs on a
 background queue and calls `exit()` rather than `terminate()`, so a jammed main
 thread cannot stop it firing — which matters, because the failure it exists for
 was a print job that ran 42 minutes at 100% CPU and wrote a 17 GB file before
-anyone noticed. `just kill-probes` handles anything started by hand.
+anyone noticed.
+
+`just kill-probes` is the backstop for anything that outlives its watchdog or
+was started by hand. **It matches on the `--harness-run` tag in argv, not on the
+executable path**, and that distinction is the whole reason the recipe is worth
+reading: the 17 GB job survived its `pkill` precisely because the pattern was a
+path. It had been started as `./marq` from a `cd`'d shell, so the full path
+never appeared in its command line and the sweep reported success while the
+process kept writing. Every process this repo launches now carries the tag
+however it is invoked: `argv[1...]` is the one part of the command line the
+launch path cannot distort. The path pattern is still tried second, for an
+untagged binary someone started by hand; anything left after both is listed
+rather than silently missed, which is how an installed `/Applications/Marq.app`
+shows up in the output and is deliberately left alone.
+
+**Don't "simplify" this to `pkill -x marq`.** The process name is `marq` for the
+debug binary *and* for the installed `/Applications/Marq.app/Contents/MacOS/marq`,
+so that sweep kills the app the user is reading with. Nor is `-x Marq` an
+alternative: `main.swift` assigns `CommandLine.unsafeArgv[0] = "Marq"` for the
+menu bar, but that only swaps a pointer in the argv array — it does not rewrite
+the saved argument region `ps` reads, so externally `args` still shows the
+invocation path and `comm`/`ucomm` still say `marq`. Verified on a live process;
+`pkill -x Marq` matches nothing.
+
+The general lesson, since it will apply to the next instrument too: **a
+supervisor that identifies its targets by how they were launched will miss the
+ones launched differently — and a failed sweep looks exactly like a clean one.**
 
 ## Using it
 
@@ -130,6 +173,20 @@ The `/verify` skill in `.claude/skills/` says the same thing to an agent.
 If an instrument is genuinely missing, add it to `pdftool` or as a flag on the
 app, where the next session will find it — not to a scratchpad that is deleted
 when the session ends.
+
+## What it does not cover
+
+The harness observes **layout** — how a document renders on screen and on paper.
+It says nothing about behaviour: navigation history, anchor jumps, zoom steps,
+the file watcher, keyboard handling. Those are still verified by a human driving
+the app, and past attempts to instrument them from outside (a temporary
+`--selftest-nav` flag, JS probes patched in and reverted) were more trouble than
+they were worth. If behavioural checks become worth automating, the same
+principle applies: a flag on the app, reporting JSON, not a driver outside it.
+
+It also measures only the built-in A4-with-36pt-margins page. When the export
+starts respecting the system Page Setup, `--print` and the baselines need to
+follow it.
 
 ## Things that have caught this harness out
 
