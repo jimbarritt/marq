@@ -499,11 +499,12 @@ document.addEventListener('click', function(e) {
         window.webkit.messageHandlers.anchor.postMessage({ from: from, to: window.scrollY });
         return;
     }
-    // Navigate to relative markdown file via Swift
-    if (href.endsWith('.md') || href.endsWith('.markdown')) {
-        e.preventDefault();
-        window.webkit.messageHandlers.navigate.postMessage(href);
-    }
+    // Skip other non-local schemes (mailto:, tel:, ftp:, etc.) — a colon before
+    // any slash marks a scheme, not a Windows-style drive or relative segment.
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) return;
+    // Navigate to any other relative local file via Swift
+    e.preventDefault();
+    window.webkit.messageHandlers.navigate.postMessage(href);
 });
 
 // Resolve an anchor href to its element. The id is percent-encoded in the href
