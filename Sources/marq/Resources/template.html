@@ -744,47 +744,10 @@ function measureColumns(table, mode) {
     return widths;
 }
 
-function maxMinFairWidths(max, min, avail) {
-    const n = max.length;
-    const fixed = new Array(n).fill(false);
-    const widths = new Array(n).fill(0);
-    let budget = avail;
-    let remaining = n;
-
-    // Repeat: any column narrower than an equal share of what is left is
-    // satisfied outright, which frees more room for the columns still growing.
-    let changed = true;
-    while (changed && remaining > 0) {
-        changed = false;
-        const share = budget / remaining;
-        for (let i = 0; i < n; i++) {
-            if (!fixed[i] && max[i] <= share) {
-                fixed[i] = true;
-                widths[i] = max[i];
-                budget -= max[i];
-                remaining--;
-                changed = true;
-            }
-        }
-    }
-
-    if (remaining > 0) {
-        const share = budget / remaining;
-        for (let i = 0; i < n; i++) {
-            if (!fixed[i]) widths[i] = Math.max(share, min[i]);
-        }
-    }
-    // `satisfied` marks the columns that got their full content width.
-    return { widths: widths, satisfied: fixed };
-}
-
-// Paper needs a different split from the screen.
-//
-// On screen there is surplus width, and giving every unsatisfied column an equal
-// share looks tidy. On a page the remainder is small, and an equal split is the
-// worst choice available: a one-sentence column and a four-paragraph column end
-// up the same width, so the long one runs many times taller and the table
-// sprawls across pages.
+// An equal split among unsatisfied columns is the worst choice once a table no
+// longer fits its measure, on paper or on screen: a one-sentence column and a
+// four-paragraph column end up the same width, so the long one runs many times
+// taller and the table sprawls past the fold or across pages.
 //
 // Instead, floor every column at its natural minimum — the longest word, not the
 // one-character minimum that word breaking allows — and share what is left in
@@ -933,19 +896,16 @@ function restoreTableLayoutAfterPrint() {
 
 function allocateColumns(max, min, budget, table) {
     const natural = max.reduce(function(a, b) { return a + b; }, 0);
-    if (printWidthOverride !== null && natural > budget) {
+    if (natural > budget) {
         const widths = allocateForPrint(max, measureNaturalMin(table), budget);
         return { widths: widths, satisfied: widths.map(function() { return false; }) };
     }
-    if (natural <= budget) {
-        // Nothing needs to wrap — widen every column proportionally so the
-        // table still fills the window.
-        return {
-            widths: max.map(function(w) { return w + (budget - natural) * (w / natural); }),
-            satisfied: max.map(function() { return true; })
-        };
-    }
-    return maxMinFairWidths(max, min(), budget);
+    // Nothing needs to wrap — widen every column proportionally so the
+    // table still fills the window.
+    return {
+        widths: max.map(function(w) { return w + (budget - natural) * (w / natural); }),
+        satisfied: max.map(function() { return true; })
+    };
 }
 
 // A table whose columns cannot all fit the paper even at their minimum widths
@@ -1017,8 +977,11 @@ function sizeTableColumns(table, wrapper) {
     // Same reasoning as applyColumnWidths: on paper, relative rather than fixed.
     wrapper.style.width = printWidthOverride !== null ? '100%' : avail + 'px';
 
-    let scale = printWidthOverride ? fitTableFontForPrint(table, avail) : 1;
-    if (printWidthOverride) applyTableScale(table, scale);
+    applyTableScale(table, 1);
+    const natural = measureColumns(table, 'max-content').reduce(function(a, b) { return a + b; }, 0);
+    const needsShrink = printWidthOverride !== null || natural > avail;
+    const scale = needsShrink ? fitTableFontForPrint(table, avail) : 1;
+    if (needsShrink) applyTableScale(table, scale);
 
     // Lay the table out at the current scale. Returns the rendered height so the
     // caller can decide whether it needs to shrink further.

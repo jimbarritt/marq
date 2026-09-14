@@ -70,9 +70,7 @@
       "atMinScale": [],
       "brokenWords": [],
       "missingImages": [],
-      "overflowing": [
-        1
-      ]
+      "overflowing": []
     },
     "tableCount": 3,
     "tables": [
@@ -96,8 +94,8 @@
       {
         "brokenColumns": [],
         "columnCount": 6,
-        "fillPct": 120.32,
-        "fontScale": 1,
+        "fillPct": 100,
+        "fontScale": 0.854,
         "headers": [
           "Manifest",
           "Endpoint",
@@ -107,7 +105,7 @@
           "Notes"
         ],
         "index": 1,
-        "overflows": true,
+        "overflows": false,
         "rowCount": 5
       },
       {

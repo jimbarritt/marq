@@ -1,6 +1,6 @@
 # marq - macOS markdown viewer
 
-version := "minor"
+version := "1.3.0"
 app_name := "Marq"
 bundle_id := "com.jimbarritt.marq"
 
@@ -8,11 +8,22 @@ bundle_id := "com.jimbarritt.marq"
 version:
     @echo "{{version}}"
 
-# Bump the version in justfile and Info.plist
-bump VERSION:
-    sed -i '' 's/^version := ".*"/version := "{{VERSION}}"/' justfile
-    sed -i '' 's/<string>{{version}}<\/string>/<string>{{VERSION}}<\/string>/g' Sources/marq/Info.plist
-    @echo "Version bumped to {{VERSION}}"
+# Bump the version in justfile and Info.plist. PART is major, minor, or patch.
+bump PART:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IFS='.' read -r MAJOR MINOR PATCH <<< "{{version}}"
+    PATCH="${PATCH:-0}"
+    case "{{PART}}" in
+        major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+        minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+        patch) PATCH=$((PATCH + 1)) ;;
+        *) echo "usage: just bump major|minor|patch" >&2; exit 1 ;;
+    esac
+    NEW="$MAJOR.$MINOR.$PATCH"
+    sed -i '' "s/^version := \".*\"/version := \"$NEW\"/" justfile
+    sed -i '' "s/<string>{{version}}<\/string>/<string>$NEW<\/string>/g" Sources/marq/Info.plist
+    echo "Version bumped to $NEW"
 
 # Build and run marq with test doc. Pass --debug to run in foreground with logs.
 run-local *FLAGS:
