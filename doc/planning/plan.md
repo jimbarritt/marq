@@ -2,16 +2,17 @@
 
 ## What's Next
 
-- **Next:** Task 5 — Header row can be orphaned at the foot of a page (Delta: PDF Export Fidelity)
-- **Sub-doc:** (none)
+- **Next:** Mission [M-COMMENTS](M-COMMENTS-git-backed-comments.md) — git-backed comments and suggestions for markdown
+- **Sub-doc:** [M-COMMENTS-git-backed-comments.md](M-COMMENTS-git-backed-comments.md) — the mission owns its own task breakdown (T-01 onward)
 - **Blockers:** None
-- **Context:** See [Checkpoint: Session 2026-07-27 (harness)](#checkpoint-session-2026-07-27-harness)
+- **Context:** See [Delta: Git-backed Comments](#delta-git-backed-comments-mission-m-comments) below
 - **Before verifying any layout change:** `just problems`, then `just check`. See the `/verify` skill.
 
 ## Summary
 
 | Delta | Task | Status |
 |-------|------|--------|
+| [Delta: Git-backed Comments](#delta-git-backed-comments-mission-m-comments) | [Mission M-COMMENTS](M-COMMENTS-git-backed-comments.md) | TODO |
 | [Delta: Verification Harness](#delta-verification-harness) | [1. Make the app observable](#task-1-make-the-app-observable) | ✓ DONE |
 | | [2. Measurement for exported PDFs](#task-2-measurement-for-exported-pdfs) | ✓ DONE |
 | | [3. Recipes and golden baselines](#task-3-recipes-and-golden-baselines) | ✓ DONE |
@@ -26,6 +27,19 @@
 | | [6. Print font scale solved in one step](#task-6-print-font-scale-solved-in-one-step-so-minimums-did-not-fit) | ✓ DONE |
 
 Archived Deltas: see the [archive index](archive/index.md)
+
+## Delta: Git-backed Comments (Mission M-COMMENTS)
+
+Mission briefing: [M-COMMENTS-git-backed-comments.md](M-COMMENTS-git-backed-comments.md).
+
+A CLI, separate from the marq app, stores comments and suggestions on markdown
+files as W3C Web Annotations committed to an orphan `md-comments` branch
+alongside the file's own history. Marq stays a viewer; the mission covers the
+CLI only, and a later mission covers the marq UI that reads these annotations.
+
+The mission carries its own task plan (T-01 through T-09) and decision
+authority. Status and progress are tracked in the mission file itself, not
+duplicated here — see its `## Plan` table.
 
 ## Delta: Verification Harness
 
