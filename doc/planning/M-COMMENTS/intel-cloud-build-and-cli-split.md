@@ -142,11 +142,29 @@ Two layouts meet "separate install":
 | Swift package stays clean | yes, Cargo and SwiftPM ignore each other | yes |
 | Push flow already set up for a cloud session | yes, `main` here | a second repo to attach and push to |
 
-Recommendation: start under `cli/` in this repo, as the brief states, and move to
-a separate repository when packaging becomes a task. Packaging is out of scope
-for M-COMMENTS. The move is cheap at that point because the CLI has no build-time
-link to the Swift package in either layout. Jim decides, because a separate repo
-changes a constraint in the brief.
+**Decided (Jim): `cli/` in this repo, permanently.** No planned move to a
+separate repository. Packaging, if it ever needs one, points a formula at the
+subdirectory rather than moving the code.
+
+### The Rust/Swift FFI option, and why it stays out of this mission
+
+Swift can call Rust as a library, not only as a separate process: the Rust crate
+compiles as a `staticlib`, `cbindgen` generates a C header from `extern "C"`
+functions at the boundary (complex data crosses as JSON or `repr(C)` structs),
+and SwiftPM consumes the result as a `binaryTarget` pointing at a prebuilt
+`.xcframework`, or `uniffi`/`swift-bridge` generate the glue instead of writing
+it by hand. This is a real option for the later UI mission, not a dead end — see
+the option table below.
+
+The cost is specific to marq's own conventions. `CLAUDE.md`: "every `just`
+harness recipe depends on `swift build`", precisely so a stale build cannot be
+tested against by accident. Linking a Rust library breaks that invariant:
+`swift build` alone no longer produces a correct binary, because the
+`.xcframework` has to be built by `cargo` first, and a change to the Rust source
+with no matching `.xcframework` rebuild is a new version of the exact stale-build
+trap the harness exists to close. That cost is real whether or not it is worth
+paying, so it is left to the UI mission, not decided here, since this mission
+touches no Swift.
 
 ### How marq reads the annotations, later
 
@@ -158,7 +176,7 @@ text. Whatever the marq UI does, that logic must exist once.
 |---|---|
 | marq shells out to the CLI and reads its JSON | one implementation of anchoring; marq needs the CLI installed, and shows an install message when it is missing |
 | marq reads the `md-comments` branch itself in Swift | anchoring written twice, in two languages, which drift |
-| Rust library with a C ABI, linked into marq | one implementation, but adds a cross-language build to a package that is otherwise `swift build` |
+| Rust library with a C ABI, linked into marq (feasible — see above) | one implementation; breaks the "every harness recipe depends on `swift build`" invariant, because `swift build` alone can no longer produce a correct binary |
 
 Recommendation for the later UI mission: marq shells out to the CLI. The CLI's
 `list` command with JSON output and resolved anchors, which the brief already
@@ -192,7 +210,11 @@ Feedback, not questions.
 
 ## Open points for Jim
 
-1. CLI under `cli/` in this repo now, moving out at packaging time, or a separate
-   repository from the start.
+1. ~~CLI under `cli/` in this repo now, moving out at packaging time, or a
+   separate repository from the start.~~ Decided: `cli/` in this repo,
+   permanently.
 2. Whether a macOS CI runner for `swift build` and `just check` is worth one
    experiment before the UI mission.
+3. Whether the later UI mission links the CLI as a Rust library via FFI, or
+   shells out to it as a process. Feasible either way — see above. This
+   mission's recommendation stands (shell out) until the UI mission decides.
