@@ -65,6 +65,11 @@ CLI is the first interface and marq's UI comes later.
 - A cloud session can fetch custom refs, for example `refs/tsk/*`. Claude on iOS cannot
   push to custom refs. That is why comments start on the `md-comments` branch, not a
   custom ref or git notes.
+- [Intel: what a cloud session can build, and the CLI split](M-COMMENTS/intel-cloud-build-and-cli-split.md):
+  the marq package cannot build in a cloud session (AppKit, WebKit and PDFKit have no
+  Linux port), so no harness instrument runs there. Rust is the CLI language: `cargo`
+  fetches and builds crates through the session proxy, proven. Layout and how marq
+  reads annotations later are covered, with two open points for Jim.
 
 ## Decision authority
 
