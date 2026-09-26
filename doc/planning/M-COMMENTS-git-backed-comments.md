@@ -68,8 +68,14 @@ CLI is the first interface and marq's UI comes later.
 - [Intel: what a cloud session can build, and the CLI split](M-COMMENTS/intel-cloud-build-and-cli-split.md):
   the marq package cannot build in a cloud session (AppKit, WebKit and PDFKit have no
   Linux port), so no harness instrument runs there. Rust is the CLI language: `cargo`
-  fetches and builds crates through the session proxy, proven. Layout and how marq
-  reads annotations later are covered, with two open points for Jim.
+  fetches and builds crates through the session proxy, proven. Layout is decided:
+  `cli/` in this repo, permanently.
+- [ADR 0002](../adr/0002-comments-cli-talks-to-marq-as-a-spawned-process.md): marq
+  reads the CLI's output as a spawned process, not a linked library or a resident
+  daemon. Covers the measured spawn cost, why FFI risks the stale-build trap
+  `CLAUDE.md` already records, and why a local daemon does not itself provide
+  real-time collaboration between machines, that needs a network relay, a separate,
+  later architecture question.
 
 ## Decision authority
 

@@ -8,3 +8,8 @@ A native macOS markdown viewer with vim keybindings, live reload, and offline re
 - [Releasing](releasing.md) — How to build, bundle, and publish a new version
 - [Code Signing & Notarization](signing.md) — Setting up Developer ID signing and Apple notarization
 - [Moving to Ubiqtek](move-to-ubiqtek.md) — Plan for transferring repo and tap to the Ubiqtek org
+
+## Architecture Decision Records
+
+- [adr/](adr/) — decisions kept alongside their reasoning; see
+  [0001](adr/0001-record-architecture-decisions.md) for the convention

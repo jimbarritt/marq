@@ -177,11 +177,13 @@ text. Whatever the marq UI does, that logic must exist once.
 | marq shells out to the CLI and reads its JSON | one implementation of anchoring; marq needs the CLI installed, and shows an install message when it is missing |
 | marq reads the `md-comments` branch itself in Swift | anchoring written twice, in two languages, which drift |
 | Rust library with a C ABI, linked into marq (feasible — see above) | one implementation; breaks the "every harness recipe depends on `swift build`" invariant, because `swift build` alone can no longer produce a correct binary |
+| A resident daemon over a Unix socket | removes a process-spawn cost already measured as noise; adds a second wire protocol, its own lifecycle, and the same staleness risk as FFI, for a local-machine-only capability. Does not itself provide real-time collaboration between two people's machines, since that needs a network relay, not local IPC. See [ADR 0002](../../adr/0002-comments-cli-talks-to-marq-as-a-spawned-process.md) |
 
-Recommendation for the later UI mission: marq shells out to the CLI. The CLI's
-`list` command with JSON output and resolved anchors, which the brief already
-requires, is the interface. The JSON Schema in the repo is the contract between
-the two programs. `data-source-line` on rendered blocks, from
+Recommendation for the later UI mission: marq shells out to the CLI. Decided and
+recorded in [ADR 0002](../../adr/0002-comments-cli-talks-to-marq-as-a-spawned-process.md).
+The CLI's `list` command with JSON output and resolved anchors, which the brief
+already requires, is the interface. The JSON Schema in the repo is the contract
+between the two programs. `data-source-line` on rendered blocks, from
 `doc/line-number-gutter-arch.md`, is where a resolved line anchor meets the
 rendered page.
 
@@ -215,6 +217,9 @@ Feedback, not questions.
    permanently.
 2. Whether a macOS CI runner for `swift build` and `just check` is worth one
    experiment before the UI mission.
-3. Whether the later UI mission links the CLI as a Rust library via FFI, or
-   shells out to it as a process. Feasible either way — see above. This
-   mission's recommendation stands (shell out) until the UI mission decides.
+3. ~~Whether the later UI mission links the CLI as a Rust library via FFI, or
+   shells out to it as a process, or a resident daemon.~~ Decided: shell out.
+   See [ADR 0002](../../adr/0002-comments-cli-talks-to-marq-as-a-spawned-process.md),
+   which also records that this is a local-machine choice and does not itself
+   provide the real-time collaboration Jim wants for a later mission, that
+   needs a network relay between machines, a separate architecture question.
