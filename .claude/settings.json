@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "jimbarritt-claude-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "jimbarritt/claude-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "swe@jimbarritt-claude-plugins": true
+  }
+}
