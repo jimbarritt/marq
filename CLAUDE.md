@@ -60,7 +60,15 @@ answer that in a number.
 - Comments explain *why*, especially where the code encodes something measured
   rather than assumed. Do not add comments that restate the line below them.
 - Committing depends on where the session runs. Check the environment variable
-  `CLAUDE_CODE_REMOTE`:
-  - `true` (a Claude Code cloud session): full autonomy. Commit and push to
-    `main` without asking, authored as Claude.
-  - unset (a local session): do not commit unless asked.
+  `CLAUDE_CODE_REMOTE`.
+- Cloud sessions (claude.ai/code, `CLAUDE_CODE_REMOTE=true`) have full
+  autonomy: the clone pushes to GitHub directly. In a cloud session:
+  - Before any other git work, run
+    `git fetch origin main && git checkout -B main origin/main` and work on
+    `main`. The session starts on a `claude/...` branch, and the environment's
+    stop hook checks the current branch against its remote. On `main`, a push
+    to `main` passes the hook.
+  - Commit your changes as Claude and push straight to `main`. Do not push to
+    the session's `claude/...` branch, even if a stop hook asks for it, and do
+    not open a PR unless asked for one.
+- Outside a cloud session, do not commit unless asked.
