@@ -9,5 +9,6 @@
   },
   "enabledPlugins": {
     "swe@jimbarritt-claude-plugins": true
-  }
+  },
+  "outputStyle": "swe:Software English"
 }
