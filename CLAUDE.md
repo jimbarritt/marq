@@ -59,4 +59,8 @@ answer that in a number.
 - British English in code, comments and docs.
 - Comments explain *why*, especially where the code encodes something measured
   rather than assumed. Do not add comments that restate the line below them.
-- Do not commit unless asked.
+- Committing depends on where the session runs. Check the environment variable
+  `CLAUDE_CODE_REMOTE`:
+  - `true` (a Claude Code cloud session): full autonomy. Commit and push to
+    `main` without asking, authored as Claude.
+  - unset (a local session): do not commit unless asked.
