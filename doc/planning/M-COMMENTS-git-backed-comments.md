@@ -150,7 +150,8 @@ reference in `CLAUDE.md`, `README.md`, `doc/` and `.claude/skills/verify/` updat
 to match. No line of Swift, and no recipe's logic, changed. A cloud session has no
 Swift toolchain (see the intel doc), so this cannot be built or checked here.
 **T-01 does not start until Jim confirms `cd macos && swift build && just check`
-still passes on macOS.**
+still passes on macOS.** Naming (`macos/`, not `mac/` or `mac-os/`) is
+[ADR 0003](../adr/0003-repo-layout-macos-and-cli-directories.md).
 
 ## First behaviour
 
