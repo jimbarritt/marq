@@ -6,7 +6,7 @@ Marq is not an editor or a knowledge management system. It's a unix-philosophy t
 
 It tiles naturally alongside your terminal and editor in tiling window managers like Aerospace, with no window decorations or UI chrome getting in the way.
 
-See [examples/test.md](examples/test.md) for a demo of all supported features.
+See [macos/examples/test.md](macos/examples/test.md) for a demo of all supported features.
 
 ## Install
 
@@ -98,7 +98,10 @@ marq notes.md --dump-metrics -           # report its layout as JSON
 
 ### Building from source
 
+Run from `macos/`, where the Swift package and `justfile` live:
+
 ```bash
+cd macos
 just bundle        # builds build/Marq.app
 just run-app       # builds and opens with test doc
 just check         # layout regression check against tests/baselines/
@@ -118,6 +121,8 @@ caught it out.
 
 ## Publishing a release
 
+Run from `macos/`.
+
 1. Check the current version:
    ```bash
    just version
@@ -130,7 +135,7 @@ caught it out.
 
 3. Commit the version bump:
    ```bash
-   git add justfile Sources/marq/Info.plist
+   git add macos/justfile macos/Sources/marq/Info.plist
    git commit -m "Bump to v1.2.0"
    git push
    ```

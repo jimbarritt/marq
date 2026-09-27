@@ -2,7 +2,7 @@
 
 This document explains how the line-number gutter is built and why it can drift out of alignment with the rendered content. It is a reference for debugging — it does **not** prescribe a fix.
 
-All code references are to `Sources/marq/Resources/template.html`.
+All code references are to `macos/Sources/marq/Resources/template.html`.
 
 ---
 
@@ -181,13 +181,13 @@ Replaces fragile timing assumptions with a declarative "rebuild whenever content
 
 ## Outcome
 
-Option A was implemented in `Sources/marq/Resources/template.html`:
+Option A was implemented in `macos/Sources/marq/Resources/template.html`:
 
 - Added `ResizeObserver` on `#content` (near bottom of the script block) that calls `buildGutter()` whenever content geometry changes. Comment notes the re-entrancy safety (depends on `align-self: flex-start` preventing content from being resized when `gutter.style.height` is set).
 - Removed the old `window.addEventListener('resize', ...)` listener — subsumed by the observer.
 - Trimmed the image-load loop in `renderMarkdown` — it no longer calls `buildGutter` (observer handles it); its remaining job is just re-applying `window.scrollTo(0, 0)` after all images load (so the page doesn't end up scrolled mid-image-load).
 
-Side change in `Sources/marq/MarqApp.swift`: added `webView.isInspectable = true` (gated to `if #available(macOS 13.3, *)`). Enables Safari to attach Web Inspector to the embedded WKWebView via Safari → Develop → [Mac name] → marq. Critical for future debugging.
+Side change in `macos/Sources/marq/MarqApp.swift`: added `webView.isInspectable = true` (gated to `if #available(macOS 13.3, *)`). Enables Safari to attach Web Inspector to the embedded WKWebView via Safari → Develop → [Mac name] → marq. Critical for future debugging.
 
 Verification tested live with `/Users/jmdb/Code/github/ubiqtek/tilr/doc/arch/move-window-to-space-flow.md`:
 

@@ -1,13 +1,20 @@
 # Marq
 
-Native macOS markdown viewer: Swift/AppKit wrapping a `WKWebView`.
+Native macOS markdown viewer: Swift/AppKit wrapping a `WKWebView`. The repo also
+holds `cli/`, a separate Rust CLI for git-backed comments (mission M-COMMENTS);
+the two share nothing but the repo and the markdown files marq renders.
 
-- `Sources/marq/MarqApp.swift` — the app: window, menus, navigation, PDF export, CLI.
-- `Sources/marq/Resources/template.html` — the whole renderer. Vendored `marked`,
+- `macos/Sources/marq/MarqApp.swift` — the app: window, menus, navigation, PDF export, CLI.
+- `macos/Sources/marq/Resources/template.html` — the whole renderer. Vendored `marked`,
   `highlight.js`, `mermaid`, KaTeX, plus all the layout JavaScript. Swift injects
   markdown by calling `renderMarkdown(md, resetScroll)`.
-- `Sources/pdftool/main.swift` — measurement for exported PDFs.
+- `macos/Sources/pdftool/main.swift` — measurement for exported PDFs.
 - `doc/planning/plan.md` — task tracking, and the source of truth for it.
+
+All `just` recipes and `swift build` run from inside `macos/`, not the repo
+root: `cd macos && just check`. Everything below that names a bare path such as
+`Sources/marq/` or `tests/baselines/` means it relative to `macos/`, unless it
+says `cli/` explicitly.
 
 ## Verifying a change
 

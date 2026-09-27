@@ -9,11 +9,11 @@ Marq is a window, so every check has to be asked of the app rather than read off
 the terminal. The instruments below are ordered by cost. **Start at the top.**
 Most questions are answered before you reach the bottom, and the expensive
 habit in this repo has been reaching for measurement before reaching for the
-source.
+source. Every `just` command below runs from `macos/`, not the repo root.
 
 ## 0. Read the source first
 
-The entire renderer is `Sources/marq/Resources/template.html`, vendored CSS
+The entire renderer is `macos/Sources/marq/Resources/template.html`, vendored CSS
 included. Anything of the form "why is this element grey / centred / spaced like
 that" is a `grep`, not a probe. One such question was answered by a JS probe
 patched into the app twice, at eleven times the cost of the `grep` that settled
@@ -46,7 +46,7 @@ wrongly.
 
 ## 3. `just check` — did anything else move?
 
-Compares every fixture's metrics to `tests/baselines/`: table shape, fill
+Compares every fixture's metrics to `macos/tests/baselines/`: table shape, fill
 percentage, font scale, broken columns, and the exported page count. Several
 bugs here were regressions of an earlier fix — "Manifest" breaking, then
 "Status" once "Manifest" was fixed — each found days later by a human looking at

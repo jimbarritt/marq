@@ -57,7 +57,7 @@ zoom, whatever the reader last zoomed the app to.
 
 ### 2. `pdftool` measures the exported PDF
 
-A second executable in the same package (`Sources/pdftool`), so `swift build`
+A second executable in the same package (`macos/Sources/pdftool`), so `swift build`
 builds it alongside the app and it can never be stale. It replaces `render.swift`,
 `lines.swift`, `chars.swift`, `vlines.swift` and `bars.swift`, three of which had
 been written twice.
@@ -71,6 +71,8 @@ been written twice.
 | `vlines` | column borders as printed, and the gaps between them — the real column widths |
 
 ### 3. Recipes, so the plumbing is never retyped
+
+Run from `macos/`, not the repo root.
 
 ```
 just problems FILE              # anything listed is a bug — start here
@@ -97,7 +99,7 @@ cut over a failing baseline.
 
 ### 4. Golden baselines
 
-`just check` compares each fixture's metrics to `tests/baselines/`: table shape,
+`just check` compares each fixture's metrics to `tests/baselines/` (inside `macos/`): table shape,
 fill percentage, font scale, broken columns, and the exported page count.
 
 Several bugs in this repo were regressions of an earlier fix — "Manifest"

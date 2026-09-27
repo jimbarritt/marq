@@ -130,7 +130,8 @@ Jim decides:
 
 | ID | Task | Objective, in short | Delegated to | Blocked by | Status |
 |---|---|---|---|---|---|
-| T-01 | Read the intelligence | W3C selectors, Hypothesis re-anchoring and the four analyses understood | none | none | TODO |
+| T-00 | Reshape the repo into `macos/` and `cli/` | The existing Swift app moved into `macos/`, a clean `cli/` ready for the CLI, every path reference updated, nothing else changed | none | none | DONE, awaiting Jim's macOS build confirmation |
+| T-01 | Read the intelligence | W3C selectors, Hypothesis re-anchoring and the four analyses understood | none | T-00 | TODO |
 | T-02 | Write the design doc | `doc/comments-design.md` complete, one reason per decision | none | T-01 | TODO |
 | T-03 | Write the JSON Schema | Schema in the repo, fixtures validate | none | T-02 | TODO |
 | T-04 | Build the storage layer | Read and write annotation files on `md-comments` without touching the working tree | none | T-02 | TODO |
@@ -143,6 +144,14 @@ Jim decides:
 **Essential task**: T-04. The mission fails if comments do not live in git alongside the
 markdown, because that is the requirement no existing tool meets.
 
+**T-00 note**: done as a pure `git mv` of `Sources/`, `Package.swift`, `justfile`,
+`tests/`, `tools/`, `examples/` and `assets/` into `macos/`, with every path
+reference in `CLAUDE.md`, `README.md`, `doc/` and `.claude/skills/verify/` updated
+to match. No line of Swift, and no recipe's logic, changed. A cloud session has no
+Swift toolchain (see the intel doc), so this cannot be built or checked here.
+**T-01 does not start until Jim confirms `cd macos && swift build && just check`
+still passes on macOS.**
+
 ## First behaviour
 
 Take ownership of the plan above before any other action. Add the implied tasks, reorder
@@ -150,8 +159,7 @@ as you see fit, and write it back as your own.
 
 ## Execution constraints
 
-- Files: `doc/`, `Package.swift`, new source and test directories for the CLI. Do not
-  edit `Sources/marq/`.
+- Files: `doc/` and `cli/` (the Rust CLI and its tests). Do not edit `macos/`.
 - Tests use temporary git repos and a local bare repo as the remote. They never push to
   GitHub.
 - Commit and push your work before the session ends. The cloud container gets deleted.

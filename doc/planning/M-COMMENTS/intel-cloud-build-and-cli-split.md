@@ -53,7 +53,7 @@ Every instrument in `doc/agent-harness.md` runs the app binary: `--dump-metrics`
 `--export-png`, `--export-pdf`, `pdftool`, `just check` against the baselines. None
 of them is available. What a cloud session can do for the marq app:
 
-- Read and edit `Sources/marq/` and `template.html`.
+- Read and edit `macos/Sources/marq/` and `template.html` (paths as of the T-00 reshape).
 - Answer "why is this grey" questions by grep, which `CLAUDE.md` names as the
   right first instrument anyway.
 - Reason about a change. It cannot measure one.
@@ -84,7 +84,7 @@ Caveats, so this is an experiment rather than a plan:
 - It does nothing for the export-and-look-at-it class of check, only for the
   numeric one.
 
-This is outside M-COMMENTS, which changes nothing in `Sources/marq/`. It matters
+This is outside M-COMMENTS, which changes nothing in `macos/Sources/marq/`. It matters
 for the later UI mission.
 
 ## 2. The split: a Rust CLI and the macOS app
@@ -202,8 +202,8 @@ rendered page.
 Feedback, not questions.
 
 - "Files: `doc/`, `Package.swift`, new source and test directories for the CLI".
-  With Rust, `Package.swift` does not change. The files list becomes `doc/`,
-  `cli/` and its tests.
+  Fixed: the Swift package moved to `macos/` as T-00, so the files list is now
+  `doc/` and `cli/`.
 - T-09 "Update `doc/planning/plan.md`" is partly done: `plan.md` references this
   mission as of commit `772c5af`. The delta gets its task rows when T-02 fixes
   the plan.
