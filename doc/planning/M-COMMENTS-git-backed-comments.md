@@ -130,8 +130,8 @@ Jim decides:
 
 | ID | Task | Objective, in short | Delegated to | Blocked by | Status |
 |---|---|---|---|---|---|
-| T-00 | Reshape the repo into `macos/` and `cli/` | The existing Swift app moved into `macos/`, a clean `cli/` ready for the CLI, every path reference updated, nothing else changed | none | none | DONE, awaiting Jim's macOS build confirmation |
-| T-01 | Read the intelligence | W3C selectors, Hypothesis re-anchoring and the four analyses understood | none | T-00 | TODO |
+| T-00 | Reshape the repo into `macos/` and `cli/` | The existing Swift app moved into `macos/`, a clean `cli/` ready for the CLI, every path reference updated, nothing else changed | none | none | DONE |
+| T-01 | Read the intelligence | W3C selectors, Hypothesis re-anchoring and the four analyses understood | none | T-00 | DONE |
 | T-02 | Write the design doc | `doc/comments-design.md` complete, one reason per decision | none | T-01 | TODO |
 | T-03 | Write the JSON Schema | Schema in the repo, fixtures validate | none | T-02 | TODO |
 | T-04 | Build the storage layer | Read and write annotation files on `md-comments` without touching the working tree | none | T-02 | TODO |
@@ -147,11 +147,28 @@ markdown, because that is the requirement no existing tool meets.
 **T-00 note**: done as a pure `git mv` of `Sources/`, `Package.swift`, `justfile`,
 `tests/`, `tools/`, `examples/` and `assets/` into `macos/`, with every path
 reference in `CLAUDE.md`, `README.md`, `doc/` and `.claude/skills/verify/` updated
-to match. No line of Swift, and no recipe's logic, changed. A cloud session has no
-Swift toolchain (see the intel doc), so this cannot be built or checked here.
-**T-01 does not start until Jim confirms `cd macos && swift build && just check`
-still passes on macOS.** Naming (`macos/`, not `mac/` or `mac-os/`) is
-[ADR 0003](../adr/0003-repo-layout-macos-and-cli-directories.md).
+to match. No line of Swift, and no recipe's logic, changed. Naming (`macos/`, not
+`mac/` or `mac-os/`) is [ADR 0003](../adr/0003-repo-layout-macos-and-cli-directories.md).
+Confirmed on macOS 2026-09-28: `just run-app` builds and launches the window.
+`just check` itself (the baseline metrics comparison) was not separately run;
+low risk, since it exercises `tests/baselines/` and `tools/check-metrics.py`
+paths that moved with everything else and nothing about their content changed,
+and it is unrelated to this mission's own work either way (M-COMMENTS never
+touches `macos/`). Worth a `just check` run before relying on the harness
+itself for anything, but it does not block T-01.
+
+**T-01 note**: findings recorded in
+[intel-anchoring-and-prior-art.md](M-COMMENTS/intel-anchoring-and-prior-art.md):
+the W3C selector properties and the reply-targets-an-annotation reading, the
+Hypothesis client's actual re-anchoring source (its help pages are marketing
+copy with nothing technical on them), read from `hypothesis/client` directly:
+the fallback order (`RangeSelector` → `TextPositionSelector`, which becomes a
+search hint, → `TextQuoteSelector`), the fuzzy-match scoring, and one limit
+worth not copying, no minimum match-quality floor, so a bad edit can silently
+re-anchor to the wrong text instead of orphaning. The four analyses re-read
+for what each contributes past the brief's own summary: none of the four
+models resolved-comment history, so that part of T-02 is original design, not
+adaptation.
 
 ## First behaviour
 

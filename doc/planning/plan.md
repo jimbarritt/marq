@@ -4,7 +4,7 @@
 
 - **Next:** Mission [M-COMMENTS](M-COMMENTS-git-backed-comments.md) — git-backed comments and suggestions for markdown
 - **Sub-doc:** [M-COMMENTS-git-backed-comments.md](M-COMMENTS-git-backed-comments.md) — the mission owns its own task breakdown (T-00 onward)
-- **Blockers:** T-00 (the repo reshape into `macos/` and `cli/`) is done and pushed but unverified. Jim confirms `cd macos && swift build && just check` still passes on macOS before T-01 starts.
+- **Blockers:** None. T-00 confirmed on macOS 2026-09-28 (`just run-app` builds and launches). T-01 done. Next: T-02, the design doc.
 - **Context:** See [Delta: Git-backed Comments](#delta-git-backed-comments-mission-m-comments) below
 - **Before verifying any layout change:** `just problems`, then `just check`. See the `/verify` skill.
 
