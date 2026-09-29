@@ -4,7 +4,7 @@
 
 - **Next:** Mission [M-COMMENTS](M-COMMENTS-git-backed-comments.md) — git-backed comments and suggestions for markdown
 - **Sub-doc:** [M-COMMENTS-git-backed-comments.md](M-COMMENTS-git-backed-comments.md) — the mission owns its own task breakdown (T-00 onward)
-- **Blockers:** None. T-00 to T-02 done; the design is [doc/comments-design.md](../comments-design.md). Next: T-03 (JSON Schema), T-04 (storage) and T-05 (anchoring), which do not depend on each other.
+- **Blockers:** T-13 moved `macos/examples/` to `example-docs/` at the repo root; Jim confirms `cd macos && just check` still passes. T-03 (JSON Schema), T-04 (storage) and T-05 (anchoring) do not depend on it and start next. The design is [doc/comments-design.md](../comments-design.md).
 - **Context:** See [Delta: Git-backed Comments](#delta-git-backed-comments-mission-m-comments) below
 - **Before verifying any layout change:** `just problems`, then `just check`. See the `/verify` skill.
 
@@ -47,7 +47,8 @@ Every entry below this line, and every dated Checkpoint in this file, predates
 that move and states paths as they were at the repo root at the time it was
 written — `Sources/marq/`, `Package.swift`, `justfile`, `tests/`, `tools/`,
 `examples/`, `assets/` are now `macos/Sources/marq/`, `macos/Package.swift`, and
-so on. `CLAUDE.md`, `README.md` and `doc/` outside this file carry the current
+so on. On 2026-09-29 (T-13) `macos/examples/` moved again, to `example-docs/` at
+the repo root. `CLAUDE.md`, `README.md` and `doc/` outside this file carry the current
 paths.
 
 ## Delta: Verification Harness

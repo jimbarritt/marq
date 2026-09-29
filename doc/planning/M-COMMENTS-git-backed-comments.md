@@ -141,7 +141,9 @@ Jim decides:
 | T-08 | Document agent use | A section an agent reads to use the CLI, ready to paste into `CLAUDE.md` | none | T-06 | TODO |
 | T-09 | Update `doc/planning/plan.md` | A delta for this mission with its tasks and status | none | T-02 | DONE |
 | T-10 | Build `render` | The static HTML page of design 6.1, checked by a test on a fixture | none | T-05, T-06 | TODO |
-| T-11 | Confirm on macOS | Jim runs `cd cli && cargo test` on macOS and it passes | Jim | T-07, T-10 | TODO |
+| T-13 | Move `macos/examples/` to `example-docs/` | The example docs at the repo root for the app and the CLI; `macos/justfile` and `check-metrics.py` updated | none | T-02 | DONE, awaiting Jim's `cd macos && just check` |
+| T-14 | Build the acceptance run | `cli/justfile` and `cli/ops/local/acceptance.py`; `just acceptance` writes the scenario page of design 7.1 | none | T-06, T-10, T-13 | TODO |
+| T-11 | Confirm on macOS | Jim runs `cd cli && just test && just acceptance` on macOS, both pass, and the page shows the expected results | Jim | T-07, T-14 | TODO |
 | T-12 | Write the completion report | `doc/planning/M-COMMENTS/M-COMMENTS-git-backed-comments-report.md`, as the brief specifies | none | T-11 | TODO |
 
 **Essential task**: T-04. The mission fails if comments do not live in git alongside the
@@ -183,6 +185,11 @@ State changes are separate files for the same reason. The quote must match
 exactly, with a context floor, so a removed word orphans instead of re-anchoring
 elsewhere. The plan table above is rewritten to the design: T-10 (`render`),
 T-11 (macOS confirmation) and T-12 (the report) are new.
+Jim's answers to the three open design points (2026-09-29): a `changed`
+anchor status when the diff still locates edited text (design 4.2); a rejected
+suggestion can reopen, accepted stays final (design 5); the `--agent` flag stays
+as designed. Jim also asked for an acceptance run he can open and check
+(design 7.1), which added T-13 and T-14.
 
 ## First behaviour
 
@@ -191,7 +198,7 @@ as you see fit, and write it back as your own.
 
 ## Execution constraints
 
-- Files: `doc/` and `cli/` (the Rust CLI and its tests). Do not edit `macos/`.
+- Files: `doc/` and `cli/` (the Rust CLI and its tests). Do not edit `macos/`, except the path updates of T-13.
 - Tests use temporary git repos and a local bare repo as the remote. They never push to
   GitHub.
 - Commit and push your work before the session ends. The cloud container gets deleted.

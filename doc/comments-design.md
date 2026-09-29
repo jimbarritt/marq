@@ -228,21 +228,31 @@ markdown file after the edit.
 ### 4.2 Resolving an anchor
 
 `resolve(annotation, current text)` runs these steps in order and stops at the
-first that succeeds. Its result is `anchored` with a range, or `orphaned`.
+first that succeeds. Its result is one of three statuses:
+
+- `anchored`: the quoted text is in the file, with a range.
+- `changed`: the quoted text is gone, but the line diff locates the same place, and other text now stands there. The result carries the current range and the original quote.
+- `orphaned`: no location.
+
+The steps:
 
 1. **Unchanged file.** The current blob id equals `marq:sourceBlob`, and the text at the position equals the quote: anchored.
 2. **Mapped position.** Read the recorded version from `versions/<blob id>`, run a line diff (`similar`) from it to the current text, and map the recorded start line to the current file. If that line is unchanged and the text at the mapped position equals the quote: anchored. The mapped position is also the hint for step 3.
 3. **Quote search.** Find every exact occurrence of the quote. For each, score its context: the number of code points by which the text before it ends with the stored `prefix`, plus the number by which the text after it starts with the stored `suffix`. Discard candidates below the floor (4.3). Pick the highest score, then the nearest to the hint, then the lowest offset: anchored.
-4. Otherwise: **orphaned**.
+4. **Changed in place.** If the diff in step 2 shows the recorded line replaced (a hunk with old and new lines, not a pure deletion), take the new line at the same index within the hunk. For a line anchor, that whole line is the range: changed. For a word anchor, compare the old line and the new line: the range is the new text between their common prefix and their common suffix, where the word stood. If that range is not empty: changed.
+5. Otherwise: **orphaned**. This covers a deleted line, a hunk that shrank past the recorded line, and a word removed with nothing in its place.
 
 For a line anchor, step 3 compares whole lines equal to the quote.
 
 | Decision | Reason |
 |---|---|
-| The quote must match exactly; no fuzzy match on the anchored text | The brief requires an anchor to orphan rather than attach to other text. A comment is about particular words: when they change, the comment's subject changed, and guessing is the failure T-01 found in Hypothesis. |
+| The quote must match exactly in steps 1 to 3; no fuzzy match on the anchored text | Only exact text proves an anchor is the same words; fuzzy matching re-attached anchors to wrong text in Hypothesis (T-01). |
+| A separate `changed` status, reached only through the line diff | Jim's decision (2026-09-29): a typo fix or a reworded line must not lose the comment. The diff locates the place by position in the file's history, not by guessing at similar text, and the status tells the reader the text differs from the quote. |
+| `changed` carries the original quote | The reader compares what the comment was about with what stands there now. |
+| A word removed with nothing in its place orphans | The brief requires removed anchored text to report as orphaned. |
 | Context scoring accepts partial matches | Nearby edits often trim a few characters of context, and that must not orphan an anchor whose own text is intact. |
 | The position mapped through a line diff, before any search | It is the strongest evidence that a candidate is the same text, and it separates a moved duplicate from the original. |
-| Orphan status is computed on every read and never stored | The markdown changes without the CLI's involvement, so a stored status goes stale; Hypothesis computes it the same way (T-01). |
+| Status is computed on every read and never stored | The markdown changes without the CLI's involvement, so a stored status goes stale; Hypothesis computes it the same way (T-01). |
 
 ### 4.3 The floor
 
@@ -266,9 +276,11 @@ These are the anchoring tests for T-05.
 | Text added or removed in another paragraph | Anchored at the shifted position (step 2) |
 | The anchored paragraph moved elsewhere in the file | Anchored at the new position (step 3, context intact) |
 | The anchored word's line rewritten, word kept, context mostly kept | Anchored (step 3) |
-| The anchored word deleted | Orphaned |
+| The anchored word changed, for example a typo fixed | Changed: range on the new word, original quote shown (step 4) |
+| A commented line edited | Changed: range on the edited line (step 4) |
+| The anchored word deleted, rest of the line kept | Orphaned (step 4 range empty) |
+| The anchored line deleted | Orphaned |
 | The anchored word deleted, the same word elsewhere in different prose | Orphaned (the floor rejects the other occurrence) |
-| The anchored word changed, for example a typo fixed | Orphaned |
 | Two identical sentences, the second commented, text inserted above both | Anchored on the second (step 2 mapping) |
 
 ## 5. State
@@ -276,7 +288,7 @@ These are the anchoring tests for T-05.
 | Motivation | States | Transitions |
 |---|---|---|
 | `commenting` | `open`, `resolved` | `resolve`: open to resolved. `reopen`: resolved to open. |
-| `editing` | `open`, `accepted`, `rejected` | `accept` or `reject` from open. Both are final. |
+| `editing` | `open`, `accepted`, `rejected` | `accept` or `reject` from open. `reopen`: rejected to open. Accepted is final. |
 | `replying` | none | A reply follows its root's state. |
 
 The current state is the last state change in (`created`, `id`) order. With none,
@@ -286,9 +298,10 @@ the state is `open`.
 |---|---|
 | State is a fold over state-change files | Resolving and accepting never delete, as the brief requires, and parallel state changes merge. |
 | Order by `created`, then `id` | Every clone computes the same state from the same files. |
-| `accepted` and `rejected` are final | An accepted edit already changed the markdown, and reopening cannot undo that. |
+| `accepted` is final | An accepted edit already changed the markdown, and reopening cannot undo that. |
+| `rejected` can reopen | Jim's decision (2026-09-29): rejecting changes no text, so reopening loses nothing. |
 | A suggestion with both an `accepted` and a `rejected` change after a sync is reported with a warning, and the fold result stands | This happens only when two clones decide in parallel; the working-tree text shows what happened, and a person settles it. |
-| `accept` re-anchors first and refuses an orphaned suggestion | Applying an edit at a stale position corrupts the markdown. |
+| `accept` re-anchors first and refuses a suggestion that is not `anchored` | Applying an edit at a stale position, or over text that changed since the suggestion, corrupts the markdown. |
 | `accept` writes the working-tree file and never commits it | The working branch belongs to the user; the CLI commits only to `md-comments`. |
 
 ## 6. CLI
@@ -303,10 +316,10 @@ the state is `open`.
 | `suggest FILE --line N --text OLD [--nth K] --replace NEW [-m TEXT]` | A suggestion to replace OLD on line N. `--range` works as for `comment`. |
 | `list FILE [--state open\|resolved\|accepted\|rejected\|all] [--json]` | Annotations on FILE with threads and resolved anchors. Default `all`. |
 | `show ID [--json]` | One thread, with the full state-change history. |
-| `resolve ID`, `reopen ID` | State changes for a comment. |
+| `resolve ID`, `reopen ID` | State changes for a comment; `reopen` also reopens a rejected suggestion. |
 | `accept ID`, `reject ID` | State changes for a suggestion; `accept` also edits the file. |
 | `sync [--remote NAME]` | Fetch, merge and push `md-comments` (section 2.4). |
-| `render FILE [-o OUT.html]` | A plain HTML page: the markdown source in a `<pre>`, anchored ranges in `<mark>`, threads beside them, orphans listed. |
+| `render FILE [-o OUT.html]` | A plain HTML page: the markdown source in a `<pre>`, anchored and changed ranges in `<mark>`, threads beside them, orphans listed. |
 
 Global flags: `--author "Name <email>"`, `--agent`, `-C DIR` (run as if in DIR,
 as `git -C` does).
@@ -331,10 +344,12 @@ Text by default, one thread per block:
 ```
 
 An orphan prints `orphaned` in place of `file:line:column`, with the stored quote.
+A changed anchor prints `changed` after the location, then `was "<original quote>"`.
 
 `--json` prints one object per thread: the stored annotation unchanged, then
 `state`, `anchor` (`{"status": "anchored", "start", "end", "line", "column"}` or
-`{"status": "orphaned"}`), `stateChanges`, and `replies` in the same shape.
+`{"status": "changed", ..., "original"}` or `{"status": "orphaned"}`),
+`stateChanges`, and `replies` in the same shape.
 
 | Decision | Reason |
 |---|---|
@@ -352,7 +367,7 @@ random uuids make 6 characters unique in practice.
 | 0 | Success |
 | 1 | Error: git failure, bad arguments, invalid file |
 | 2 | An `ID` matched no annotation, or more than one |
-| 3 | `accept` refused an orphaned suggestion |
+| 3 | `accept` refused a suggestion whose anchor is `changed` or `orphaned` |
 
 Reason: scripts and agents branch on the cause without parsing messages.
 
@@ -367,6 +382,38 @@ Reason: scripts and agents branch on the cause without parsing messages.
 | Tests run git with `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1` and a fixed author | Measured: this container's global `push.negotiate true` printed errors on local pushes. Tests must not depend on the machine's git configuration. |
 | JSON fixtures in `cli/tests/fixtures/`, each validated against the schema from T-03 | The brief requires every fixture to validate. |
 | The parallel-write test: two clones each add annotations, both `sync`, and each ends with every annotation | This is the brief's proof of parallel writes (T-07). |
+
+### 7.1 The acceptance run
+
+`cd cli && just acceptance` builds the CLI and runs
+`cli/ops/local/acceptance.py`. The script copies `example-docs/test.md` into a
+temporary git repository, runs the scenarios below with the real binary, and
+writes `cli/target/acceptance/index.html`: one section per scenario, with the
+`marq-comments render` page and the `list` output for that step. It prints the
+path. `just acceptance-open` also opens the page (`open` on macOS, `xdg-open` on
+Linux).
+
+| Scenario | What the page shows |
+|---|---|
+| A comment on a word, then an agent reply | The word marked, the thread with a Person and a Software author |
+| A comment on a whole line | The line marked |
+| A suggestion, accepted | The file text after the edit, state `accepted` |
+| A suggestion, rejected, then reopened | State `open`, both state changes in the history |
+| A paragraph added above the comments | Every anchor `anchored` at its shifted position |
+| A commented paragraph moved further down | The anchor `anchored` at the new position |
+| A typo fixed in a commented word | The anchor `changed`, with the original quote |
+| A commented word deleted | The anchor `orphaned`, listed below the text |
+| A comment resolved | State `resolved` |
+| A second clone adds a comment, both `sync` | Both clones list every comment |
+
+| Decision | Reason |
+|---|---|
+| A `justfile` at `cli/` with `build`, `test`, `acceptance` and `acceptance-open` | Jim runs one command and gets a page to check, the same pattern as `macos/justfile`. |
+| The script in Python, standard library only | Jim prefers Python for scripting, and no install step is needed on macOS or Linux. |
+| The script lives at `cli/ops/local/` | Jim's layout for scripts run on a local machine. |
+| The example is `example-docs/test.md`, moved from `macos/examples/` to the repo root | The app and the CLI both use it, so it belongs to neither directory. |
+| Scenarios run on a copy in a temporary repository | The acceptance run never changes `example-docs/` or this repository's `md-comments` branch. |
+| Output under `cli/target/` | Cargo already ignores `target/`, so nothing generated reaches a commit. |
 
 ## 8. Known limits
 
