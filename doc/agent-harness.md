@@ -111,7 +111,7 @@ The baselines record only what should be stable. Exact pixel heights are
 deliberately excluded: they move with any typographic change and would make the
 check noise.
 
-**Adding a fixture:** put the markdown file in `examples/`, add its path to
+**Adding a fixture:** put the markdown file in `example-docs/` at the repo root, add its path (relative to `macos/`) to
 `FIXTURES` in `tools/check-metrics.py`, and run `just bless`. A fixture earns
 its place by exercising a case the existing ones do not — `test.md` is the
 stress corpus (six-column tables, long identifiers, images, maths), and

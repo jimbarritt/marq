@@ -30,9 +30,9 @@ run-local *FLAGS:
     #!/usr/bin/env bash
     swift build
     if echo "{{FLAGS}}" | grep -q -- "--debug"; then
-        .build/debug/marq examples/test.md
+        .build/debug/marq ../example-docs/test.md
     else
-        nohup .build/debug/marq examples/test.md --harness-run &>/dev/null &
+        nohup .build/debug/marq ../example-docs/test.md --harness-run &>/dev/null &
     fi
 
 ### Harness ###################################################################
@@ -53,17 +53,17 @@ harness_dir := ".harness"
 # The default width is stated because allocation depends on the available measure.
 #
 # Metrics for the screen layout, as JSON.
-probe FILE="examples/test.md" WIDTH="960": _build
+probe FILE="../example-docs/test.md" WIDTH="960": _build
     @.build/debug/marq {{FILE}} --width {{WIDTH}} --dump-metrics - --timeout 60 --harness-run 2>/dev/null
 
 # Column widths, font scale and broken words as they will print.
 #
 # Measures the A4 page without exporting anything.
-probe-print FILE="examples/test.md": _build
+probe-print FILE="../example-docs/test.md": _build
     @.build/debug/marq {{FILE}} --dump-metrics - --print --timeout 60 --harness-run 2>/dev/null
 
 # Just the headline: anything listed here is a bug.
-problems FILE="examples/test.md": _build
+problems FILE="../example-docs/test.md": _build
     #!/usr/bin/env bash
     set -euo pipefail
     for mode in screen print; do
@@ -74,7 +74,7 @@ problems FILE="examples/test.md": _build
     done
 
 # Screen render as a PNG, whole document. Prints the path.
-shot FILE="examples/test.md" WIDTH="960": _build
+shot FILE="../example-docs/test.md" WIDTH="960": _build
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p {{harness_dir}}
@@ -83,7 +83,7 @@ shot FILE="examples/test.md" WIDTH="960": _build
     echo "$OUT"
 
 # Export a PDF and report its shape. Prints the path.
-pdf FILE="examples/test.md": _build
+pdf FILE="../example-docs/test.md": _build
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p {{harness_dir}}
@@ -285,7 +285,7 @@ release IDENTITY APPLE_ID TEAM_ID: (sign IDENTITY) (notarize APPLE_ID TEAM_ID)
 
 # Run the bundled .app (rebuilds automatically)
 run-app: bundle
-    open "build/{{app_name}}.app" --args "$(pwd)/examples/test.md"
+    open "build/{{app_name}}.app" --args "$(pwd)/../example-docs/test.md"
 
 # Build and install to /Applications
 install-local: bundle

@@ -27,7 +27,7 @@ PDFTOOL = ROOT / ".build" / "debug" / "pdftool"
 BASELINES = ROOT / "tests" / "baselines"
 WORK = ROOT / ".harness" / "check"
 
-FIXTURES = ["examples/test.md", "examples/anchor-test.md"]
+FIXTURES = ["../example-docs/test.md", "../example-docs/anchor-test.md"]
 
 # Tags every process this script launches, so `just kill-probes` can find one
 # that outlived its watchdog by argument rather than by executable path.

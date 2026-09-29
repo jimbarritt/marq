@@ -6,7 +6,7 @@ Marq is not an editor or a knowledge management system. It's a unix-philosophy t
 
 It tiles naturally alongside your terminal and editor in tiling window managers like Aerospace, with no window decorations or UI chrome getting in the way.
 
-See [macos/examples/test.md](macos/examples/test.md) for a demo of all supported features.
+See [example-docs/test.md](example-docs/test.md) for a demo of all supported features.
 
 ## Install
 
