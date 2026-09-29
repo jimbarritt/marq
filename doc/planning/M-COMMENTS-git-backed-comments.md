@@ -132,14 +132,17 @@ Jim decides:
 |---|---|---|---|---|---|
 | T-00 | Reshape the repo into `macos/` and `cli/` | The existing Swift app moved into `macos/`, a clean `cli/` ready for the CLI, every path reference updated, nothing else changed | none | none | DONE |
 | T-01 | Read the intelligence | W3C selectors, Hypothesis re-anchoring and the four analyses understood | none | T-00 | DONE |
-| T-02 | Write the design doc | `doc/comments-design.md` complete, one reason per decision | none | T-01 | TODO |
-| T-03 | Write the JSON Schema | Schema in the repo, fixtures validate | none | T-02 | TODO |
-| T-04 | Build the storage layer | Read and write annotation files on `md-comments` without touching the working tree | none | T-02 | TODO |
-| T-05 | Build anchoring | Quote and position selectors resolve, re-anchor after edits, report orphans | none | T-02 | TODO |
-| T-06 | Build the CLI commands | Add, reply, suggest, list, resolve, accept, reject all work | none | T-04, T-05 | TODO |
-| T-07 | Prove parallel writes | Two clones against a bare remote merge with no lost annotation | none | T-06 | TODO |
+| T-02 | Write the design doc | [`doc/comments-design.md`](../comments-design.md) complete, one reason per decision | none | T-01 | DONE |
+| T-03 | Write the JSON Schema | Schemas for an annotation and a state change in `cli/schema/`; fixtures in `cli/tests/fixtures/` validate (design 3, 7) | none | T-02 | TODO |
+| T-04 | Build the storage layer | Crate scaffold in `cli/`; write, read and `sync` on `md-comments` through a temporary index, never touching the working tree (design 2) | none | T-02 | TODO |
+| T-05 | Build anchoring | Selector creation, the four-step resolve, the floor; one test per row of design 4.4 | none | T-02 | TODO |
+| T-06 | Build the CLI commands | `comment`, `reply`, `suggest`, `list`, `show`, `resolve`, `reopen`, `accept`, `reject`, with text and JSON output and the exit codes (design 5, 6) | none | T-03, T-04, T-05 | TODO |
+| T-07 | Prove parallel writes | Two clones against a bare remote, both `sync`, no lost annotation, including parallel state changes on one annotation | none | T-06 | TODO |
 | T-08 | Document agent use | A section an agent reads to use the CLI, ready to paste into `CLAUDE.md` | none | T-06 | TODO |
-| T-09 | Update `doc/planning/plan.md` | A delta for this mission with its tasks and status | none | T-02 | TODO |
+| T-09 | Update `doc/planning/plan.md` | A delta for this mission with its tasks and status | none | T-02 | DONE |
+| T-10 | Build `render` | The static HTML page of design 6.1, checked by a test on a fixture | none | T-05, T-06 | TODO |
+| T-11 | Confirm on macOS | Jim runs `cd cli && cargo test` on macOS and it passes | Jim | T-07, T-10 | TODO |
+| T-12 | Write the completion report | `doc/planning/M-COMMENTS/M-COMMENTS-git-backed-comments-report.md`, as the brief specifies | none | T-11 | TODO |
 
 **Essential task**: T-04. The mission fails if comments do not live in git alongside the
 markdown, because that is the requirement no existing tool meets.
@@ -169,6 +172,17 @@ re-anchor to the wrong text instead of orphaning. The four analyses re-read
 for what each contributes past the brief's own summary: none of the four
 models resolved-comment history, so that part of T-02 is original design, not
 adaptation.
+
+**T-02 note**: [`doc/comments-design.md`](../comments-design.md). Two git mechanics
+were measured on git 2.43 before the design relied on them: a write through a
+temporary index leaves the working tree clean, and `merge-tree --write-tree`
+merges diverged `md-comments` tips. The same test showed identical adds at one
+path merge clean and different content at one path conflicts, which is why every
+path on the branch is a random id or a blob id and no file is ever modified.
+State changes are separate files for the same reason. The quote must match
+exactly, with a context floor, so a removed word orphans instead of re-anchoring
+elsewhere. The plan table above is rewritten to the design: T-10 (`render`),
+T-11 (macOS confirmation) and T-12 (the report) are new.
 
 ## First behaviour
 

@@ -4,7 +4,7 @@
 
 - **Next:** Mission [M-COMMENTS](M-COMMENTS-git-backed-comments.md) — git-backed comments and suggestions for markdown
 - **Sub-doc:** [M-COMMENTS-git-backed-comments.md](M-COMMENTS-git-backed-comments.md) — the mission owns its own task breakdown (T-00 onward)
-- **Blockers:** None. T-00 confirmed on macOS 2026-09-28 (`just run-app` builds and launches). T-01 done. Next: T-02, the design doc.
+- **Blockers:** None. T-00 to T-02 done; the design is [doc/comments-design.md](../comments-design.md). Next: T-03 (JSON Schema), T-04 (storage) and T-05 (anchoring), which do not depend on each other.
 - **Context:** See [Delta: Git-backed Comments](#delta-git-backed-comments-mission-m-comments) below
 - **Before verifying any layout change:** `just problems`, then `just check`. See the `/verify` skill.
 
@@ -37,7 +37,7 @@ files as W3C Web Annotations committed to an orphan `md-comments` branch
 alongside the file's own history. Marq stays a viewer; the mission covers the
 CLI only, and a later mission covers the marq UI that reads these annotations.
 
-The mission carries its own task plan (T-00 through T-09) and decision
+The mission carries its own task plan (T-00 through T-12) and decision
 authority. Status and progress are tracked in the mission file itself, not
 duplicated here — see its `## Plan` table.
 
