@@ -89,7 +89,9 @@ pub fn selectors_for_line(text: &str, line: usize) -> Result<Selectors, String> 
     };
     let content = text::slice(text, start, end).unwrap_or_default();
     if content.trim().is_empty() {
-        return Err(format!("line {line} is blank, and a blank line cannot carry a comment"));
+        return Err(format!(
+            "line {line} is blank, and a blank line cannot carry a comment"
+        ));
     }
     let mut selectors = selectors_for_range(text, start, end)?;
     selectors.line = Some((line - 1, line));
@@ -155,7 +157,8 @@ pub fn resolve(selectors: &Selectors, recorded: Option<&str>, current: &str) -> 
 
     // Step 4: the recorded line was replaced, so other text stands in its place.
     if let Some((old, old_line, new_line)) = replaced {
-        if let Some((start, end)) = changed_in_place(selectors, &exact, &old, old_line, &cur, new_line)
+        if let Some((start, end)) =
+            changed_in_place(selectors, &exact, &old, old_line, &cur, new_line)
         {
             return Anchor::Changed {
                 start,
@@ -204,7 +207,9 @@ impl<'a> Doc<'a> {
 
     /// The offset of 0-based line `line`, or the end of the text past the last.
     fn line_start(&self, line: usize) -> usize {
-        self.lines.get(line).map_or(self.chars.len(), |&(start, _)| start)
+        self.lines
+            .get(line)
+            .map_or(self.chars.len(), |&(start, _)| start)
     }
 
     /// Whether `exact` stands at `position`; for a line anchor, also that it
