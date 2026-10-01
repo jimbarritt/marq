@@ -88,16 +88,16 @@ pub fn run(cli: Cli) -> Outcome {
         }
         Command::Reply { id, message } => {
             let store = store()?;
-            let id = reply(&store, &who, &id, &message)?;
+            let id = store.with_lock(|| reply(&store, &who, &id, &message))?;
             emit(&format!("{id}\n"));
         }
         Command::List { file, state, json } => list(&store()?, &file, state, json)?,
         Command::Show { id, json } => show(&store()?, &id, json)?,
-        Command::Resolve { id } => change_state(&store()?, &who, &id, Action::Resolve)?,
-        Command::Reopen { id } => change_state(&store()?, &who, &id, Action::Reopen)?,
-        Command::Reject { id } => change_state(&store()?, &who, &id, Action::Reject)?,
-        Command::Accept { id } => accept(&store()?, &who, &id)?,
-        Command::Sync { remote } => sync(&store()?, &remote)?,
+        Command::Resolve { id } => decide(&store()?, &who, &id, Action::Resolve)?,
+        Command::Reopen { id } => decide(&store()?, &who, &id, Action::Reopen)?,
+        Command::Reject { id } => decide(&store()?, &who, &id, Action::Reject)?,
+        Command::Accept { id } => decide(&store()?, &who, &id, Action::Accept)?,
+        Command::Sync { remote } => sync(&store()?, &who, &remote)?,
         Command::Render { file, output } => render_file(&store()?, &file, output.as_deref())?,
     }
     Ok(())
@@ -267,7 +267,8 @@ fn reply(store: &Store, who: &Who, id: &str, message: &str) -> Outcome<String> {
         .ok_or_else(|| Error::message("the stored annotation has no id"))?;
     let mut annotation = model::new_reply(&creator, message, target_id);
     // Replies sort by `created`, so a reply made in the same second as the
-    // annotation or a sibling it follows must still sort after it.
+    // annotation or a sibling it follows must still sort after it. The caller
+    // holds the write lock, so no sibling lands between this read and the write.
     let records = store.read_document(&found.document)?;
     let latest = records
         .annotations
@@ -479,6 +480,19 @@ fn current_state(store: &Store, key: &str, annotation: &Value) -> Result<String>
     ))
 }
 
+/// Runs a state change with the write lock held from the read of the current
+/// state to the write of the new one, and for `accept` around the edit of the
+/// file too. Within one repository two processes then cannot both find an
+/// annotation open and both decide it, and two `accept`s on one file cannot
+/// each write over the other's edit. Between clones, parallel decisions stay
+/// possible, and the fold of design 5 settles them.
+fn decide(store: &Store, who: &Who, id: &str, action: Action) -> Outcome {
+    store.with_lock(|| match action {
+        Action::Accept => accept(store, who, id),
+        _ => change_state(store, who, id, action),
+    })
+}
+
 fn change_state(store: &Store, who: &Who, id: &str, action: Action) -> Outcome {
     let creator = who.creator(store)?;
     let found = store.find_annotation(id)?;
@@ -553,8 +567,16 @@ fn accept(store: &Store, who: &Who, id: &str) -> Outcome {
 
 // ---- sync and render ----
 
-fn sync(store: &Store, remote: &str) -> Outcome {
-    let report = store.sync(remote)?;
+/// `--author`, when given, also names the author of a merge commit.
+fn sync(store: &Store, who: &Who, remote: &str) -> Outcome {
+    let author = match &who.author {
+        Some(arg) => {
+            let (name, email) = parse_author(arg)?;
+            Some(Creator::person(name, email))
+        }
+        None => None,
+    };
+    let report = store.sync_as(remote, author.as_ref())?;
     emit(&sync_lines(&report, remote));
     Ok(())
 }
