@@ -147,8 +147,7 @@ the contents, whatever the number of annotations.
 | Decision | Reason |
 |---|---|
 | `source` is the repo-relative path, a relative IRI reference | The repository has no single URL (clones, forks, a laptop), and a relative reference resolves against wherever the repository is. |
-| `marq:sourceBlob` is the git blob id of the working-tree file at the time of writing; the file is read once, the selectors are computed from those bytes, and that same buffer is stored as the blob | A second read would let an edit between the two reads put the blob and the selectors out of step. |
-| (Superseded wording) the blob id comes from `git hash-object -w` | The blob is the same unfiltered one. | It records the exact text the selectors describe, with or without a commit, and section 4.2 uses it to map positions forward. |
+| `marq:sourceBlob` is the git blob id of the working-tree file at the time of writing; the file is read once, the selectors are computed from those bytes, and that same buffer is stored as the blob | It records the exact text the selectors describe, with or without a commit, and section 4.2 uses it to map positions forward. A second read would let an edit between the two reads put the blob and the selectors out of step. |
 | Both a `TextQuoteSelector` and a `TextPositionSelector`, exactly one of each in the array | The quote survives edits and the position gives the search a starting point (T-01, Hypothesis's order). |
 | `prefix` and `suffix` are always present, and are empty strings at the start or end of the file | A reader never has to ask whether a key may be missing. |
 | The positions are code points, as in section 4.1 | Stated here too, because the storage layer stores them as given. |
