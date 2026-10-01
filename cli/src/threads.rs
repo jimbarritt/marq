@@ -135,23 +135,41 @@ pub fn is_root(annotation: &Value) -> bool {
 
 /// The root threads of a document, each with its replies nested, in `created`
 /// order. `current` is the markdown now in the working tree.
+///
+/// State changes and replies are grouped by the id they point at in one pass
+/// each. Scanning every record for every root was quadratic: found by T-07,
+/// `list` on 1000 comments spent 0.6 s of CPU in a release build on those scans.
 pub fn build(store: &Store, key: &str, current: &str) -> Result<Vec<Value>> {
     let records = store.read_document(key)?;
     let resolver = Resolver::new(store, key, current);
+    // Each group keeps the (`created`, `id`) order `read_document` returns,
+    // so the last change in a group is the fold of design 5.
+    let mut changes_of: HashMap<&str, Vec<&Value>> = HashMap::new();
+    for change in &records.states {
+        if let Some(about) = model::state_annotation(change) {
+            changes_of.entry(about).or_default().push(change);
+        }
+    }
+    let mut children: HashMap<&str, Vec<&Value>> = HashMap::new();
+    for reply in records.annotations.iter().filter(|a| !is_root(a)) {
+        if let Some(parent) = model::target_id(reply) {
+            children.entry(parent).or_default().push(reply);
+        }
+    }
     let mut seen = HashSet::new();
     let mut roots = Vec::new();
     for annotation in records.annotations.iter().filter(|a| is_root(a)) {
         let id = model::id(annotation).unwrap_or("");
         let anchor = anchor_value(&resolver.resolve(annotation), current);
-        let state = fold_state(id, &records.states);
-        let changes: Vec<Value> = records
-            .states
-            .iter()
-            .filter(|s| model::state_annotation(s) == Some(id))
-            .cloned()
-            .collect();
+        let own: &[&Value] = changes_of.get(id).map_or(&[], Vec::as_slice);
+        let state = own
+            .last()
+            .and_then(|s| model::state(s))
+            .unwrap_or(OPEN)
+            .to_string();
+        let changes: Vec<Value> = own.iter().map(|s| (*s).clone()).collect();
         seen.insert(id.to_string());
-        let replies = replies_of(id, &records.annotations, &state, &anchor, &mut seen);
+        let replies = replies_of(id, &children, &state, &anchor, &mut seen);
         roots.push(json!({
             "annotation": annotation,
             "state": state,
@@ -167,21 +185,18 @@ pub fn build(store: &Store, key: &str, current: &str) -> Result<Vec<Value>> {
 /// own. `seen` stops a hand-edited cycle of replies from recursing forever.
 fn replies_of(
     parent_id: &str,
-    annotations: &[Value],
+    children: &HashMap<&str, Vec<&Value>>,
     state: &str,
     anchor: &Value,
     seen: &mut HashSet<String>,
 ) -> Vec<Value> {
     let mut replies = Vec::new();
-    for reply in annotations
-        .iter()
-        .filter(|a| !is_root(a) && model::target_id(a) == Some(parent_id))
-    {
+    for reply in children.get(parent_id).map_or(&[][..], Vec::as_slice) {
         let id = model::id(reply).unwrap_or("");
         if !seen.insert(id.to_string()) {
             continue;
         }
-        let nested = replies_of(id, annotations, state, anchor, seen);
+        let nested = replies_of(id, children, state, anchor, seen);
         replies.push(json!({
             "annotation": reply,
             "state": state,

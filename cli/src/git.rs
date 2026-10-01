@@ -31,14 +31,35 @@ impl Output {
 pub struct Git {
     dir: PathBuf,
     env: Vec<(String, String)>,
+    literal_pathspecs: bool,
 }
+
+/// Variables that turn on pathspec magic for every git command. `ls-tree`
+/// refuses `glob` and `icase` magic outright ("pathspec magic not supported
+/// by this command"), so a user with one of them set could read no comments
+/// (found by T-07).
+const PATHSPEC_MAGIC_VARS: [&str; 3] = [
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_ICASE_PATHSPECS",
+];
 
 impl Git {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Git {
             dir: dir.into(),
             env: Vec::new(),
+            literal_pathspecs: false,
         }
+    }
+
+    /// A copy whose pathspecs are matched as literal paths whatever the
+    /// user's environment says: a document key such as `notes/[draft].md`
+    /// names one file, not a pattern.
+    pub fn literal_pathspecs(&self) -> Self {
+        let mut copy = self.clone();
+        copy.literal_pathspecs = true;
+        copy
     }
 
     pub fn dir(&self) -> &Path {
@@ -61,6 +82,10 @@ impl Git {
             .args(args)
             .current_dir(&self.dir)
             .env("GIT_TERMINAL_PROMPT", "0")
+            // `sync` tells a missing remote branch and a rejected push apart
+            // by git's English messages; a git with translations installed
+            // prints them in the user's language unless the locale is C.
+            .env("LC_ALL", "C")
             .stdin(if input.is_some() {
                 Stdio::piped()
             } else {
@@ -68,6 +93,12 @@ impl Git {
             })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if self.literal_pathspecs {
+            for var in PATHSPEC_MAGIC_VARS {
+                command.env_remove(var);
+            }
+            command.env("GIT_LITERAL_PATHSPECS", "1");
+        }
         for (key, value) in &self.env {
             command.env(key, value);
         }
