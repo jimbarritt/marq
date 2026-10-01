@@ -1,0 +1,51 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    {
+      "marq": "https://github.com/jimbarritt/marq/blob/main/doc/comments-design.md#"
+    }
+  ],
+  "body": [
+    {
+      "purpose": "editing",
+      "type": "TextualBody",
+      "value": ""
+    },
+    {
+      "format": "text/markdown",
+      "purpose": "commenting",
+      "type": "TextualBody",
+      "value": "The word adds nothing."
+    }
+  ],
+  "created": "2026-09-29T11:05:30Z",
+  "creator": {
+    "email": "mailto:jim@example.com",
+    "name": "Jim",
+    "type": "Person"
+  },
+  "generator": {
+    "name": "marq-comments 0.1.0",
+    "type": "Software"
+  },
+  "id": "urn:uuid:61975955-03f0-4ee2-a34e-403fe08d2e1d",
+  "motivation": "editing",
+  "target": {
+    "marq:sourceBlob": "a6d9e38c431206428083ad87c7b6b39ee26facb7",
+    "selector": [
+      {
+        "exact": "awkward",
+        "prefix": "ument or reloading it. Note the ",
+        "suffix": " slugs:\n`GPT-5.4` loses its full",
+        "type": "TextQuoteSelector"
+      },
+      {
+        "end": 276,
+        "start": 269,
+        "type": "TextPositionSelector"
+      }
+    ],
+    "source": "example-docs/test.md"
+  },
+  "type": "Annotation"
+}

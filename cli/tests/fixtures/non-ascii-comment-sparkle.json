@@ -1,0 +1,43 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    {
+      "marq": "https://github.com/jimbarritt/marq/blob/main/doc/comments-design.md#"
+    }
+  ],
+  "body": {
+    "format": "text/markdown",
+    "type": "TextualBody",
+    "value": "Ce ✨ final est charmant."
+  },
+  "created": "2026-09-30T08:13:20Z",
+  "creator": {
+    "email": "mailto:jim@example.com",
+    "name": "Jim",
+    "type": "Person"
+  },
+  "generator": {
+    "name": "marq-comments 0.1.0",
+    "type": "Software"
+  },
+  "id": "urn:uuid:a60efc32-81b0-4d2f-a3f1-ef2b98c94af2",
+  "motivation": "commenting",
+  "target": {
+    "marq:sourceBlob": "a6d9e38c431206428083ad87c7b6b39ee26facb7",
+    "selector": [
+      {
+        "exact": "*Rendered by marq* ✨",
+        "prefix": "\n| `Esc` | Close search |\n\n---\n\n",
+        "suffix": "\n",
+        "type": "TextQuoteSelector"
+      },
+      {
+        "end": 11774,
+        "start": 11754,
+        "type": "TextPositionSelector"
+      }
+    ],
+    "source": "example-docs/test.md"
+  },
+  "type": "Annotation"
+}

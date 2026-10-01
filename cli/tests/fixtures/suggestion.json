@@ -1,0 +1,51 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    {
+      "marq": "https://github.com/jimbarritt/marq/blob/main/doc/comments-design.md#"
+    }
+  ],
+  "body": [
+    {
+      "purpose": "editing",
+      "type": "TextualBody",
+      "value": "four"
+    },
+    {
+      "format": "text/markdown",
+      "purpose": "commenting",
+      "type": "TextualBody",
+      "value": "There are four steps in the list below."
+    }
+  ],
+  "created": "2026-09-29T11:02:13Z",
+  "creator": {
+    "email": "mailto:jim@example.com",
+    "name": "Jim",
+    "type": "Person"
+  },
+  "generator": {
+    "name": "marq-comments 0.1.0",
+    "type": "Software"
+  },
+  "id": "urn:uuid:dc726d0a-525f-4af7-99e4-4c8737b085e2",
+  "motivation": "editing",
+  "target": {
+    "marq:sourceBlob": "a6d9e38c431206428083ad87c7b6b39ee26facb7",
+    "selector": [
+      {
+        "exact": "three",
+        "prefix": "1. Step one\n2. Step two\n3. Step ",
+        "suffix": "\n\n## Task List\n\n- [x] Build the ",
+        "type": "TextQuoteSelector"
+      },
+      {
+        "end": 2109,
+        "start": 2104,
+        "type": "TextPositionSelector"
+      }
+    ],
+    "source": "example-docs/test.md"
+  },
+  "type": "Annotation"
+}

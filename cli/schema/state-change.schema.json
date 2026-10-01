@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jimbarritt/marq/blob/main/cli/schema/state-change.schema.json",
+  "title": "marq state change",
+  "description": "A state change stored under states/ (design section 3.6). Properties the design defines are strict. Unknown extra properties stay allowed.",
+  "type": "object",
+  "required": ["@context", "id", "type", "marq:annotation", "marq:state", "created", "creator"],
+  "properties": {
+    "@context": {
+      "type": "array",
+      "minItems": 2,
+      "prefixItems": [
+        {"const": "http://www.w3.org/ns/anno.jsonld"},
+        {
+          "type": "object",
+          "required": ["marq"],
+          "properties": {"marq": {"type": "string", "minLength": 1}}
+        }
+      ]
+    },
+    "id": {"$ref": "#/$defs/uuidIri"},
+    "type": {"const": "marq:StateChange"},
+    "marq:annotation": {"$ref": "#/$defs/uuidIri"},
+    "marq:state": {"enum": ["open", "resolved", "accepted", "rejected"]},
+    "marq:resultBlob": {"$ref": "#/$defs/blobId"},
+    "created": {"$ref": "#/$defs/utcDateTime"},
+    "creator": {"$ref": "#/$defs/creator"},
+    "generator": {"$ref": "#/$defs/generator"}
+  },
+  "if": {"properties": {"marq:state": {"const": "accepted"}}, "required": ["marq:state"]},
+  "then": {"required": ["marq:resultBlob"]},
+  "$defs": {
+    "uuidIri": {
+      "type": "string",
+      "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "utcDateTime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+    },
+    "blobId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "creator": {
+      "type": "object",
+      "required": ["type", "name"],
+      "properties": {
+        "type": {"enum": ["Person", "Software"]},
+        "name": {"type": "string", "minLength": 1},
+        "email": {"type": "string", "pattern": "^mailto:.+$"}
+      }
+    },
+    "generator": {
+      "type": "object",
+      "required": ["type", "name"],
+      "properties": {
+        "type": {"const": "Software"},
+        "name": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

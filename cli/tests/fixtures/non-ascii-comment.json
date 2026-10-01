@@ -1,0 +1,43 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    {
+      "marq": "https://github.com/jimbarritt/marq/blob/main/doc/comments-design.md#"
+    }
+  ],
+  "body": {
+    "format": "text/markdown",
+    "type": "TextualBody",
+    "value": "Très bien, le tiret cadratin est correct ici 🎉 — merci."
+  },
+  "created": "2026-09-30T08:12:44Z",
+  "creator": {
+    "email": "mailto:jim@example.com",
+    "name": "Jim",
+    "type": "Person"
+  },
+  "generator": {
+    "name": "marq-comments 0.1.0",
+    "type": "Software"
+  },
+  "id": "urn:uuid:097f5f66-79d6-46ae-9f5b-addc5659137f",
+  "motivation": "commenting",
+  "target": {
+    "marq:sourceBlob": "a6d9e38c431206428083ad87c7b6b39ee26facb7",
+    "selector": [
+      {
+        "exact": "GPT-5.4 — from",
+        "prefix": "\n\n*A pelican family rendered by ",
+        "suffix": " [Simon Willison's pelican colle",
+        "type": "TextQuoteSelector"
+      },
+      {
+        "end": 1638,
+        "start": 1624,
+        "type": "TextPositionSelector"
+      }
+    ],
+    "source": "example-docs/test.md"
+  },
+  "type": "Annotation"
+}

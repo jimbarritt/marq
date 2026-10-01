@@ -1,0 +1,27 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    {
+      "marq": "https://github.com/jimbarritt/marq/blob/main/doc/comments-design.md#"
+    }
+  ],
+  "body": {
+    "format": "text/markdown",
+    "type": "TextualBody",
+    "value": "The word names the Markdown `>` syntax, so it is the right one."
+  },
+  "created": "2026-09-29T10:31:09Z",
+  "creator": {
+    "email": "mailto:noreply@anthropic.com",
+    "name": "Claude",
+    "type": "Software"
+  },
+  "generator": {
+    "name": "marq-comments 0.1.0",
+    "type": "Software"
+  },
+  "id": "urn:uuid:5782b186-87e6-4f8a-882f-c32d2db5b196",
+  "motivation": "replying",
+  "target": "urn:uuid:98c1eb4e-e934-4674-b763-878fcb96a25f",
+  "type": "Annotation"
+}
