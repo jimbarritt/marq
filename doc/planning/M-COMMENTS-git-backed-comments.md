@@ -133,9 +133,9 @@ Jim decides:
 | T-00 | Reshape the repo into `macos/` and `cli/` | The existing Swift app moved into `macos/`, a clean `cli/` ready for the CLI, every path reference updated, nothing else changed | none | none | DONE |
 | T-01 | Read the intelligence | W3C selectors, Hypothesis re-anchoring and the four analyses understood | none | T-00 | DONE |
 | T-02 | Write the design doc | [`doc/comments-design.md`](../comments-design.md) complete, one reason per decision | none | T-01 | DONE |
-| T-03 | Write the JSON Schema | Schemas for an annotation and a state change in `cli/schema/`; fixtures in `cli/tests/fixtures/` validate (design 3, 7) | none | T-02 | TODO |
-| T-04 | Build the storage layer | Crate scaffold in `cli/`; write, read and `sync` on `md-comments` through a temporary index, never touching the working tree (design 2) | none | T-02 | TODO |
-| T-05 | Build anchoring | Selector creation, the resolve steps including `changed` (design 4.2), the context floor; one test per row of design 4.4 | none | T-02 | TODO |
+| T-03 | Write the JSON Schema | Schemas for an annotation and a state change in `cli/schema/`; fixtures in `cli/tests/fixtures/` validate (design 3, 7) | none | T-02 | DONE |
+| T-04 | Build the storage layer | Crate scaffold in `cli/`; write, read and `sync` on `md-comments` through a temporary index, never touching the working tree (design 2) | none | T-02 | DONE |
+| T-05 | Build anchoring | Selector creation, the resolve steps including `changed` (design 4.2), the context floor; one test per row of design 4.4 | none | T-02 | DONE |
 | T-06 | Build the CLI commands | `comment`, `reply`, `suggest`, `list`, `show`, `resolve`, `reopen`, `accept`, `reject`, with text and JSON output and the exit codes (design 5, 6) | none | T-03, T-04, T-05 | TODO |
 | T-07 | Prove parallel writes | Two clones against a bare remote, both `sync`, no lost annotation, including parallel state changes on one annotation | none | T-06 | TODO |
 | T-08 | Document agent use | A section an agent reads to use the CLI, ready to paste into `CLAUDE.md` | none | T-06 | TODO |
@@ -176,6 +176,14 @@ models resolved-comment history, so that part of T-02 is original design, not
 adaptation.
 
 **Model note**: T-05 and T-07 are the tasks that need Opus 5.5; the rest can run on Sonnet 5.5. The routes are in `plan.md` under What's Next. Reason: both hold edge cases the acceptance run does not reach (code-point offsets, identical sentences, a lost `update-ref` race, a rejected push), so passing scenarios is not proof there.
+
+**T-03, T-04 and T-05 note (2026-10-01)**: built in parallel by three subagents in separate worktrees
+(T-05 on Opus), merged into `main`, and checked by the orchestrator, not taken from the reports: 70 tests pass
+(`schema` 4, `store` 22, `anchor` 35 plus 9 unit), clippy and fmt clean. The findings were written back into
+`doc/comments-design.md`: an advisory write lock (8 contending writers lost writes with retries alone), unrelated
+roots on the first sync (`--allow-unrelated-histories`), the three-part rule for a changed range, and the schema
+details (accepted needs `marq:resultBlob`, body forms per motivation, line numbering of the fragment selector).
+T-07 must exercise the real binary with several processes, since T-04's tests use threads in one process.
 
 **T-14 note**: the acceptance run is test-first. `cd cli && just acceptance` runs ten
 scenarios and writes `cli/target/acceptance/index.html`. With no crate yet, all ten fail with

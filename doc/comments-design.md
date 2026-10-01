@@ -26,6 +26,7 @@ accepts a suggestion.
 | A library crate (`marq_comments`) with a thin binary (`marq-comments`) | ADR 0002: a later daemon or server reuses the anchoring code without a rewrite. |
 | The `git` binary through `std::process::Command`, no `gix` or `libgit2` | The brief requires the `git` binary, and it is the git the user already has configured. |
 | Git 2.38 or later | `git merge-tree --write-tree`, the command that merges `md-comments` without a checkout, arrived in 2.38. Measured on 2.43; macOS ships 2.39 or later. |
+| Rust 1.89 or later | The file lock in section 2.2 uses `File::lock`, stable from 1.89. |
 | Dependencies: `clap`, `serde`, `serde_json`, `uuid`, `similar`, `time`; `tempfile` and `jsonschema` for tests only | Each covers one listed need: arguments, JSON, ids, line diffs, timestamps, test repos, schema checks. |
 
 ## 2. Storage: the `md-comments` branch
@@ -67,13 +68,17 @@ Every write is one commit on `md-comments`, made without a checkout:
 | Decision | Reason |
 |---|---|
 | A temporary index, never the repository's own index | The user's staged changes and working tree stay untouched. Measured: both clones' `git status` stayed clean through writes and a merge. |
-| `update-ref` with the expected old value, retried from step 2 up to 10 times on failure | Two `marq-comments` processes in one clone cannot lose each other's write: git refuses a stale old value (measured). |
-| Commit messages of the form `comment <short id> on <path>` | `git log md-comments` reads as a history of review activity. |
+| `update-ref` with the expected old value, retried from step 2 up to 10 times on failure | A writer that does not take the lock below cannot overwrite another's commit: git refuses a stale old value (measured). |
+| An advisory file lock on `<git dir>/marq-comments.lock` around every write and every sync merge | Measured by T-04: with the retries alone, 8 threads making 5 writes each starved one writer past 10 retries and lost its writes. The lock makes writers take turns, and the retry stays as the guard for a writer that skips it. `File::lock` needs Rust 1.89 or later. |
+| The markdown blob is made with `git hash-object -w --no-filters` | The blob then holds the raw bytes the selector positions were measured on, whatever `core.autocrlf` says. |
+| The temporary index lives in the git directory, named with the process id and a random suffix, and is removed on drop | Two processes never share one, and a crash leaves one small file in `.git`, not in the working tree. |
+| Commit messages `comment <short id> on <path>`, `reply ...`, `suggest ...`, and `<state> <short id> on <path>` for a state change | `git log md-comments` reads as a history of review activity. |
+| An `accepted` state change also adds `versions/<resultBlob>` | The text the accepted edit produced stays reachable from the branch, as the text a comment was written against does. |
 | The commit author and committer are the annotation's creator | `git log` and the annotation agree on who wrote it. |
 
 ### 2.3 Reading
 
-`git ls-tree -r --name-only refs/heads/md-comments -- documents/<path>/`, then
+`git ls-tree -r -z --name-only refs/heads/md-comments -- documents/<path>/` (`-z` so that unusual file names are not quoted), then
 `git cat-file --batch` for the files. One process for the listing and one for
 the contents, whatever the number of annotations.
 
@@ -81,14 +86,15 @@ the contents, whatever the number of annotations.
 
 `marq-comments sync [--remote origin]`:
 
-1. `git fetch <remote> +refs/heads/md-comments:refs/remotes/<remote>/md-comments`.
+1. `git fetch <remote> +refs/heads/md-comments:refs/remotes/<remote>/md-comments`. A remote with no such branch is not an error: the local branch is pushed as it is. If neither side has the branch, there is nothing to do.
 2. If the local branch is missing, create it at the remote tip. If one tip contains the other, fast-forward the local ref.
-3. Otherwise `git merge-tree --write-tree <local> <remote>`, `git commit-tree` with both parents, and `update-ref` with the expected old value.
-4. `git push <remote> refs/heads/md-comments:refs/heads/md-comments`. On rejection, repeat from step 1, up to 3 times.
+3. Otherwise run `git merge-base`. When the tips share no ancestor, pass `--allow-unrelated-histories` to `merge-tree` (retry without the flag when git exits with a usage error, which is git 2.38 to 2.40). Then `git merge-tree --write-tree <local> <remote>`, `git commit-tree` with both parents, and `update-ref` with the expected old value.
+4. `git push <remote> refs/heads/md-comments:refs/heads/md-comments`. When git reports the push as rejected, repeat from step 1, up to 3 times. Any other push failure is returned at once.
 
 | Decision | Reason |
 |---|---|
 | Full ref names in every fetch and push | An unqualified name can resolve to a different ref with no error; the tsk repository lost work to exactly this (its ADR 0008). |
+| `--allow-unrelated-histories` when the tips share no ancestor | Measured by T-04: two clones that each write a first comment before syncing have unrelated root commits, which `merge-tree` refuses without the flag. This is the common first sync, not a corner case. The identical `README.md` and `format.json` blobs merge clean. |
 | A `sync` command, not plain `git pull` | A plain merge of `md-comments` needs it checked out, and the branch never appears in the working tree. |
 | A conflict from `merge-tree` is an error, with no automatic resolution | Section 2.1 makes it impossible for files the CLI wrote; a conflict means someone edited the branch by hand, and a person decides. |
 
@@ -117,8 +123,10 @@ the contents, whatever the number of annotations.
 | `id` is `urn:uuid:<random v4 uuid>` | W3C requires an IRI, a `urn:uuid` needs no host, and random ids make a short prefix unique enough to type (section 6.3). |
 | The file name is the uuid, without the `urn:uuid:` part | The path stays short and still unique. |
 | `created` is UTC with a `Z` suffix, to the second | The W3C model requires `xsd:dateTime` in UTC. |
+| `creator.email` is stored as `mailto:<address>` and omitted when there is no email; `creator.name` is always present | An empty `mailto:` is not a valid IRI. |
 | `creator` from `--author "Name <email>"`, else `git config user.name` and `user.email`; an error if neither | The brief names these sources, and an annotation without an author breaks the review record. |
 | `creator.type` is `Person`, or `Software` with `--agent` | The W3C model has both types, and the marq UI later shows which comments an agent wrote. |
+| `created` is whole seconds, with no fraction and no offset | The `xsd:dateTime` form allows more; one form means one parser and one sort order. |
 | JSON written with sorted keys, two-space indentation and a final newline | The brief requires minimal diffs; `serde_json::Value` sorts keys by default. |
 
 ### 3.2 A comment on a word
@@ -140,7 +148,9 @@ the contents, whatever the number of annotations.
 |---|---|
 | `source` is the repo-relative path, a relative IRI reference | The repository has no single URL (clones, forks, a laptop), and a relative reference resolves against wherever the repository is. |
 | `marq:sourceBlob` is the git blob id of the working-tree file at the time of writing, from `git hash-object -w` | It records the exact text the selectors describe, with or without a commit, and section 4.2 uses it to map positions forward. |
-| Both a `TextQuoteSelector` and a `TextPositionSelector` | The quote survives edits and the position gives the search a starting point (T-01, Hypothesis's order). |
+| Both a `TextQuoteSelector` and a `TextPositionSelector`, exactly one of each in the array | The quote survives edits and the position gives the search a starting point (T-01, Hypothesis's order). |
+| `prefix` and `suffix` are always present, and are empty strings at the start or end of the file | A reader never has to ask whether a key may be missing. |
+| The positions are code points, as in section 4.1 | Stated here too, because the storage layer stores them as given. |
 | `body.format` is `text/markdown` | Comment text is markdown and marq renders it as markdown. |
 
 ### 3.3 A comment on a whole line
@@ -148,14 +158,15 @@ the contents, whatever the number of annotations.
 ```json
 "selector": [
   {"type": "FragmentSelector", "conformsTo": "http://tools.ietf.org/rfc/rfc5147", "value": "line=11,12"},
-  {"type": "TextQuoteSelector", "exact": "It supports three agent presets.", "prefix": "...", "suffix": "..."},
+  {"type": "TextQuoteSelector", "exact": "It supports three agent presets.", "prefix": "plugin uses esbuild.\n\n", "suffix": "\n\nThe next section"},
   {"type": "TextPositionSelector", "start": 530, "end": 562}
 ]
 ```
 
 | Decision | Reason |
 |---|---|
-| A `FragmentSelector` with RFC 5147 `line=N-1,N` for line N | RFC 5147 is the plain-text fragment scheme the W3C model lists, so the line anchor needs no extension. |
+| A `FragmentSelector` with RFC 5147 `line=N-1,N` for the 1-based line N, so the example above anchors line 12 | RFC 5147 counts lines from 0 and the end is exclusive. RFC 5147 is the plain-text fragment scheme the W3C model lists, so the line anchor needs no extension. |
+| The fragment selector is present on a line comment and absent on a word comment | Its presence is what marks the anchor as a whole line when it is read back. The quote and position selectors give the recorded line. |
 | The line's text as the quote, without its newline | A whole-line anchor re-anchors by the same method as a word anchor. |
 | A blank line cannot carry a comment | Its quote is empty and matches every blank line. |
 
@@ -171,6 +182,7 @@ the contents, whatever the number of annotations.
 |---|---|
 | The target is the replied-to annotation's id | The W3C `replying` motivation targets a previous annotation. |
 | A reply may target a reply | Threads nest, and `list` shows the tree. |
+| A comment or a reply has one `TextualBody` object as `body`, never an array | One form per motivation keeps readers simple; only a suggestion needs two bodies. |
 
 ### 3.5 A suggestion
 
@@ -186,6 +198,7 @@ the contents, whatever the number of annotations.
 | Decision | Reason |
 |---|---|
 | Motivation `editing`, with the replacement text as a body with `purpose: editing` | The W3C model defines `editing` as a request to change the target. |
+| `body` of a suggestion is an array of one or two bodies: exactly one with `purpose: editing`, and at most one with `purpose: commenting` | A suggestion may be a bare replacement, or carry its reason. |
 | An optional second body with `purpose: commenting` | A suggestion usually carries its reason, and the purpose tells a consumer which body is which. |
 | A suggestion always replaces a non-empty range; an insertion replaces a word with the word plus the new text, a deletion replaces with `""` | The anchor needs text to quote; an empty quote matches everywhere. |
 
@@ -211,6 +224,8 @@ markdown file after the edit.
 | Decision | Reason |
 |---|---|
 | A state change is its own file in the extension vocabulary, not an edit to the annotation | Section 2.1: no file is modified, so two clones that change one annotation's state still merge clean, and every earlier state stays in the tree as well as in history. |
+| A state change carries the same `@context`, `id`, `created` and `creator` as an annotation; `generator` is optional on both | A state change is a record of who did what and when, so it needs the same provenance. |
+| `marq:resultBlob` is required on `accepted` and allowed on no other state | An accepted suggestion must record the text its edit produced. |
 | The annotation file carries no state property | A W3C consumer then reads a valid annotation, and the state lives only where the fold in section 5 reads it. |
 | `marq:resultBlob` on `accepted` | It records exactly which text the accepted edit produced. |
 
@@ -224,6 +239,8 @@ markdown file after the edit.
 | Positions count Unicode code points | The W3C model counts characters, and code points are the unit that does not depend on an encoding. The marq UI converts to UTF-16 when it needs to. |
 | `prefix` and `suffix` are up to 32 code points | Long enough to tell repeated words apart in prose, short enough that an edit a sentence away leaves them intact. |
 | A file that is not valid UTF-8 is an error | Selectors over undecodable bytes cannot be quoted. |
+| An empty range, a range past the end of the text, and a blank or whitespace-only line are errors when creating selectors | An empty quote matches everywhere, and a blank line matches every blank line. |
+| Lines split on `\n` only; a trailing `\r` stays in the line; a trailing newline adds no line | One rule for every clone; CRLF is a known limit (section 8). |
 
 ### 4.2 Resolving an anchor
 
@@ -239,7 +256,10 @@ The steps:
 1. **Unchanged file.** The current blob id equals `marq:sourceBlob`, and the text at the position equals the quote: anchored.
 2. **Mapped position.** Read the recorded version from `versions/<blob id>`, run a line diff (`similar`) from it to the current text, and map the recorded start line to the current file. If that line is unchanged and the text at the mapped position equals the quote: anchored. The mapped position is also the hint for step 3.
 3. **Quote search.** Find every exact occurrence of the quote. For each, score its context: the number of code points by which the text before it ends with the stored `prefix`, plus the number by which the text after it starts with the stored `suffix`. Discard candidates below the floor (4.3). Pick the highest score, then the nearest to the hint, then the lowest offset: anchored.
-4. **Changed in place.** If the diff in step 2 shows the recorded line replaced (a hunk with old and new lines, not a pure deletion), take the new line at the same index within the hunk. For a line anchor, that whole line is the range: changed. For a word anchor, compare the old line and the new line. Take the text that differs: the new text after their common prefix and before their common suffix, where the suffix is not allowed to overlap the prefix. Widen it to the enclosing run of non-whitespace characters. If the widened range is not empty: changed.
+4. **Changed in place.** If the diff in step 2 shows the recorded line replaced (a hunk with old and new lines, not a pure deletion), take the new line at the same index within the hunk. This step needs the recorded text, so it never runs when `versions/<blob>` is missing. For a line anchor, that whole line is the range: changed; a line edited to blank orphans. For a word anchor, which must lie inside its recorded start line, compare the old line and the new line and take the text that differs: the new text after their common prefix and before their common suffix, where the suffix is not allowed to overlap the prefix. Then:
+   - If the new differing text holds a non-whitespace character, widen it to the enclosing run of non-whitespace characters: changed.
+   - If it is whitespace only, or the removed old text holds whitespace (the edit crossed a word boundary, so a whole word went): orphaned.
+   - Otherwise letters went from inside one run. Widen the empty position to the run around it: changed, unless that run holds no letter or digit, which is orphaned (so `double hyphen.` becoming `double .` does not anchor on the full stop).
 5. Otherwise: **orphaned**. This covers a deleted line, a hunk that shrank past the recorded line, and a word removed with nothing in its place.
 
 For a line anchor, step 3 compares whole lines equal to the quote.
@@ -250,7 +270,9 @@ For a line anchor, step 3 compares whole lines equal to the quote.
 | A separate `changed` status, reached only through the line diff | Jim's decision (2026-09-29): a typo fix or a reworded line must not lose the comment. The diff locates the place by position in the file's history, not by guessing at similar text, and the status tells the reader the text differs from the quote. |
 | `changed` carries the original quote | The reader compares what the comment was about with what stands there now. |
 | The range is widened to the enclosing run of non-whitespace | A typo fix often changes the middle of a word, or deletes one letter, and the differing text alone would be a fragment or empty. Widening gives the whole corrected word. |
-| A word removed with nothing in its place orphans | The brief requires removed anchored text to report as orphaned. Widening a position that sits between two spaces finds no characters, so the range is empty. |
+| The three-part rule for step 4, not widening alone | Found by T-05: with a common prefix taken greedily, a typo that deletes a letter and a whole word deleted both leave an empty range in the new line, and widening alone turns the second into a changed anchor on the next word. The rule tells them apart by whether the removed text crossed a word boundary. |
+| A word removed with nothing in its place orphans | The brief requires removed anchored text to report as orphaned. |
+| The diff is `similar`'s Myers line diff | The design named no algorithm. A moved paragraph shows as a deletion plus an insertion, and step 3 finds it again. |
 | Context scoring accepts partial matches | Nearby edits often trim a few characters of context, and that must not orphan an anchor whose own text is intact. |
 | The position mapped through a line diff, before any search | It is the strongest evidence that a candidate is the same text, and it separates a moved duplicate from the original. |
 | Status is computed on every read and never stored | The markdown changes without the CLI's involvement, so a stored status goes stale; Hypothesis computes it the same way (T-01). |
@@ -258,8 +280,10 @@ For a line anchor, step 3 compares whole lines equal to the quote.
 ### 4.3 The floor
 
 A candidate from step 3 is accepted only when its context score is at least half
-of the stored context length (`len(prefix) + len(suffix)`), or when it is the
-mapped position from step 2. With no stored context (a quote that is the whole
+of the stored context length: `2 * score >= len(prefix) + len(suffix)`. The mapped
+position from step 2 is exempt. For a replaced line, that is the same column of the
+new line at the same index in the hunk; for a deleted line there is no exempt
+candidate, and the hint is the start of the hunk's new side plus the column. With no stored context (a quote that is the whole
 file) every exact match qualifies.
 
 Reason: text that moved with its paragraph keeps most of its context on both
@@ -441,3 +465,8 @@ binary, which is how the harness itself is tested.
 - **CRLF working copies** (`core.autocrlf`) change positions between clones. Linux and macOS clones do not convert by default.
 - **Clock skew** between clones can order two state changes differently from wall-clock order. Every clone still computes the same order from the same files.
 - **Large files** are diffed by line in step 2, so the cost grows with the number of lines, not characters.
+- **Two edits on one line** make step 4 compare whole lines, so the changed range widens across both. A character diff mapped through the quote's own range would be more precise.
+- **A quote of several words** whose edit is in one word reports a changed range of that word only, not the quote's full extent.
+- **A substring match counts.** After an edit, `reloading` anchors inside `reloadingg`, because the mapped position is exempt from the floor and the design asks for exact text, not word boundaries. A UI may want to show it.
+- **A long quote with little surviving context** orphans even when it is unique in the file, because the floor counts context only.
+- **Both sides of the context lost** while the quote stays intact and its column shifts gives a `changed` range that contains the intact quote.
