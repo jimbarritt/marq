@@ -68,10 +68,10 @@ Every write is one commit on `md-comments`, made without a checkout:
 | Decision | Reason |
 |---|---|
 | A temporary index, never the repository's own index | The user's staged changes and working tree stay untouched. Measured: both clones' `git status` stayed clean through writes and a merge. |
-| `update-ref` with the expected old value, retried from step 2 up to 10 times on failure | A writer that does not take the lock below cannot overwrite another's commit: git refuses a stale old value (measured). |
-| An advisory file lock on `<git dir>/marq-comments.lock` around every write and every sync merge | Measured by T-04: with the retries alone, 8 threads making 5 writes each starved one writer past 10 retries and lost its writes. The lock makes writers take turns, and the retry stays as the guard for a writer that skips it. `File::lock` needs Rust 1.89 or later. |
+| `update-ref` with the expected old value, retried from step 2 up to 10 times on failure | A writer that does not take the lock below cannot overwrite another's commit: git refuses a stale old value (measured). A stale `refs/heads/md-comments.lock` left by a killed `git update-ref` is reported by file name and not deleted, because git cannot tell it from a live one. |
+| An advisory file lock on `<git common dir>/marq-comments.lock`, held from reading the state to writing it | The branch is shared by every worktree of a repository, so the lock lives in the common git directory (T-07: under the per-worktree git directory, two worktrees had separate locks). A command that checks a state and then writes holds the lock across both, so one `resolve` of eight racing ones succeeds. `accept` holds it around the file edit as well (T-07: eight parallel accepts recorded eight decisions and kept three edits). Measured: the lock was proved held and released at process death by a test that kills the holder. Originally introduced by T-04: Measured by T-04: with the retries alone, 8 threads making 5 writes each starved one writer past 10 retries and lost its writes. The lock makes writers take turns, and the retry stays as the guard for a writer that skips it. `File::lock` needs Rust 1.89 or later. |
 | The markdown blob is made with `git hash-object -w --no-filters` | The blob then holds the raw bytes the selector positions were measured on, whatever `core.autocrlf` says. |
-| The temporary index lives in the git directory, named with the process id and a random suffix, and is removed on drop | Two processes never share one, and a crash leaves one small file in `.git`, not in the working tree. |
+| The temporary index lives in the git directory, named with the process id and a random suffix, and is removed on drop. A writer holding the lock also deletes leftover `marq-comments-index.*` files | A SIGKILL leaves one behind (one run left 32). Deleting under the lock is safe because every taker makes its index under the lock. Two processes never share one, and a crash leaves one small file in `.git`, not in the working tree. |
 | Commit messages `comment <short id> on <path>`, `reply ...`, `suggest ...`, and `<state> <short id> on <path>` for a state change | `git log md-comments` reads as a history of review activity. |
 | An `accepted` state change also adds `versions/<resultBlob>` | The text the accepted edit produced stays reachable from the branch, as the text a comment was written against does. |
 | The commit author and committer are the annotation's creator | `git log` and the annotation agree on who wrote it. |
@@ -89,11 +89,17 @@ the contents, whatever the number of annotations.
 1. `git fetch <remote> +refs/heads/md-comments:refs/remotes/<remote>/md-comments`. A remote with no such branch is not an error: the local branch is pushed as it is. If neither side has the branch, there is nothing to do.
 2. If the local branch is missing, create it at the remote tip. If one tip contains the other, fast-forward the local ref.
 3. Otherwise run `git merge-base`. When the tips share no ancestor, pass `--allow-unrelated-histories` to `merge-tree` (retry without the flag when git exits with a usage error, which is git 2.38 to 2.40). Then `git merge-tree --write-tree <local> <remote>`, `git commit-tree` with both parents, and `update-ref` with the expected old value.
-4. `git push <remote> refs/heads/md-comments:refs/heads/md-comments`. When git reports the push as rejected, repeat from step 1, up to 3 times. Any other push failure is returned at once.
+4. `git push <remote> refs/heads/md-comments:refs/heads/md-comments`. When git reports the push as rejected, repeat from step 1, up to 10 times with a growing random pause. Any other push failure is returned at once.
+
+Syncs in one clone take turns through a second lock, `<git common dir>/marq-comments-sync.lock`; writes never wait on it. Git runs with `LC_ALL=C` and literal pathspecs, with `GIT_GLOB_PATHSPECS` and `GIT_ICASE_PATHSPECS` removed.
 
 | Decision | Reason |
 |---|---|
 | Full ref names in every fetch and push | An unqualified name can resolve to a different ref with no error; the tsk repository lost work to exactly this (its ADR 0008). |
+| 10 push attempts with a random pause, not 3 | Measured by T-07: six processes in three clones produced a rejected push three times running. |
+| A separate sync lock | Measured by T-07: 152 of 180 racing syncs in one clone failed because their fetches collided on the tracking ref. |
+| The merge commit's author is `--author` when given, else git's identity, else `marq-comments` with no email | A machine with no git identity could write comments but not merge them. |
+| `LC_ALL=C` for every git call | `sync` matches git's messages ("rejected", "couldn't find remote ref"), which git translates. Proved with a fake translating `git`, not a real one. |
 | `--allow-unrelated-histories` when the tips share no ancestor | Measured by T-04: two clones that each write a first comment before syncing have unrelated root commits, which `merge-tree` refuses without the flag. This is the common first sync, not a corner case. The identical `README.md` and `format.json` blobs merge clean. |
 | A `sync` command, not plain `git pull` | A plain merge of `md-comments` needs it checked out, and the branch never appears in the working tree. |
 | A conflict from `merge-tree` is an error, with no automatic resolution | Section 2.1 makes it impossible for files the CLI wrote; a conflict means someone edited the branch by hand, and a person decides. |
@@ -323,6 +329,7 @@ the state is `open`.
 |---|---|
 | State is a fold over state-change files | Resolving and accepting never delete, as the brief requires, and parallel state changes merge. |
 | Order by `created`, then `id` | Every clone computes the same state from the same files. |
+| A burst of N decisions on one annotation, or N replies in one thread, stamps `created` up to N seconds ahead of the clock | Found by T-07. The fold stays identical everywhere (proven), but after a sync another clone's later decision inside that window sorts before them, so "latest wins" does not always mean latest in wall time. Sub-second `created` or a logical counter would fix it and would change the format. |
 | A new state change takes `created` one second past the latest existing change for that annotation when the clock is not already later; a reply likewise against its target and that target's replies | Found by T-06: `created` has whole-second resolution and ties break on a random id, so `reject` then `reopen` inside one second folded to `rejected` about half the time. A burst of commands can run a few seconds ahead of the clock. |
 | `accepted` is final | An accepted edit already changed the markdown, and reopening cannot undo that. |
 | `rejected` can reopen | Jim's decision (2026-09-29): rejecting changes no text, so reopening loses nothing. |
@@ -453,6 +460,8 @@ binary, which is how the harness itself is tested.
 | A commented word deleted | The anchor `orphaned`, listed below the text |
 | A comment resolved | State `resolved` |
 | A second clone adds a comment, both `sync` | Both clones list every comment |
+| Three clones decide in parallel and converge (added by T-07) | A page from each clone, identical history, both decisions, the warning on each clone |
+| Twelve processes write at once (added by T-07) | Nothing lost, exactly one resolve wins, 19 commits, no merges, `fsck` clean |
 
 | Decision | Reason |
 |---|---|
@@ -477,3 +486,9 @@ binary, which is how the harness itself is tested.
 - **A long quote with little surviving context** orphans even when it is unique in the file, because the floor counts context only.
 - **Both sides of the context lost** while the quote stays intact and its column shifts gives a `changed` range that contains the intact quote.
 - **Two clones deciding in the same second** order their state changes by random id. Every clone computes the same result from the same files, but which decision wins is arbitrary. A fraction in `created` would remove the tie.
+- **A process killed between editing the file and recording `accepted`** leaves the edit in place and the suggestion open, with no message.
+- **A stale git ref lock** left by a killed `git update-ref` blocks writes until a person removes it. The tool names the file and does not delete it.
+- **`flock` is not reliable on network filesystems.**
+- **`git gc --prune=now` during a write** could remove a blob before its commit lands.
+- **Writes in one repository are serialised**, at about 31 ms each in a debug build.
+- **An accepted suggestion lists as `changed`**, because its quoted text is the text the accepted edit replaced. The guide tells agents to ignore the anchor of an accepted suggestion. Showing `accepted` and no anchor would be clearer.

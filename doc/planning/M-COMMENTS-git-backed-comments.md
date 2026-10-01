@@ -137,8 +137,8 @@ Jim decides:
 | T-04 | Build the storage layer | Crate scaffold in `cli/`; write, read and `sync` on `md-comments` through a temporary index, never touching the working tree (design 2) | none | T-02 | DONE |
 | T-05 | Build anchoring | Selector creation, the resolve steps including `changed` (design 4.2), the context floor; one test per row of design 4.4 | none | T-02 | DONE |
 | T-06 | Build the CLI commands | `comment`, `reply`, `suggest`, `list`, `show`, `resolve`, `reopen`, `accept`, `reject`, with text and JSON output and the exit codes (design 5, 6) | none | T-03, T-04, T-05 | DONE |
-| T-07 | Prove parallel writes | Two clones against a bare remote, both `sync`, no lost annotation, including parallel state changes on one annotation | none | T-06 | TODO |
-| T-08 | Document agent use | A section an agent reads to use the CLI, ready to paste into `CLAUDE.md` | none | T-06 | TODO |
+| T-07 | Prove parallel writes | Two clones against a bare remote, both `sync`, no lost annotation, including parallel state changes on one annotation | none | T-06 | DONE |
+| T-08 | Document agent use | A section an agent reads to use the CLI, ready to paste into `CLAUDE.md` | none | T-06 | DONE |
 | T-09 | Update `doc/planning/plan.md` | A delta for this mission with its tasks and status | none | T-02 | DONE |
 | T-10 | Build `render` | The static HTML page of design 6.1, checked by a test on a fixture | none | T-05, T-06 | DONE |
 | T-13 | Move `macos/examples/` to `example-docs/` | The example docs at the repo root for the app and the CLI; `macos/justfile` and `check-metrics.py` updated | none | T-02 | DONE, awaiting Jim's `cd macos && just check` |
@@ -191,6 +191,16 @@ looked at in headless Chromium, not only counted. One real bug came out of the b
 `created` has whole-second resolution, so `reject` then `reopen` inside one second folded to `rejected` half the
 time. The CLI now steps a new state change one second past the latest. Two clones deciding in the same second still
 order by random id, which T-07 must exercise.
+
+**T-07 and T-08 note (2026-10-01)**: T-07 ran on Opus and was an adversarial review of the concurrency code, not only a
+proof. It found and fixed twelve bugs, each with a regression test in `cli/tests/parallel.rs`. The two worst lost data
+silently: eight parallel `accept`s recorded eight decisions and kept three of the eight edits to the markdown file (checked
+again by the orchestrator against the pre-fix binary: 3 of 8 edits applied, all 8 marked accepted; 8 of 8 with the fix),
+and eight parallel `resolve`s all succeeded. Others: the lock sat in the per-worktree git directory, so linked worktrees
+had separate locks; racing syncs in one clone failed (152 of 180); three attempts were too few under contention; a merge
+needed a git identity; sync parsed English git messages; `list` was quadratic. Results are in design sections 2.2, 2.4, 5, 7.1
+and 8. Two acceptance scenarios were added (11 and 12). Totals on merged `main`: 161 tests, 12 of 12 scenarios, clippy and fmt
+clean. T-08 produced the agent guide and README from commands it ran. Remaining: T-11, Jim's run on macOS.
 
 **T-14 note**: the acceptance run is test-first. `cd cli && just acceptance` runs ten
 scenarios and writes `cli/target/acceptance/index.html`. With no crate yet, all ten fail with
