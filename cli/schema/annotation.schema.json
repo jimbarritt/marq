@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jimbarritt/marq/blob/main/cli/schema/annotation.schema.json",
+  "title": "marq stored annotation",
+  "description": "A W3C Web Annotation as marq-comments stores it (design section 3). Properties the design defines are strict. Unknown extra properties stay allowed so a W3C consumer can add some.",
+  "type": "object",
+  "required": ["@context", "id", "type", "created", "creator", "motivation", "body", "target"],
+  "properties": {
+    "@context": {
+      "type": "array",
+      "minItems": 2,
+      "prefixItems": [
+        {"const": "http://www.w3.org/ns/anno.jsonld"},
+        {
+          "type": "object",
+          "required": ["marq"],
+          "properties": {"marq": {"type": "string", "minLength": 1}}
+        }
+      ]
+    },
+    "id": {"$ref": "#/$defs/uuidIri"},
+    "type": {"const": "Annotation"},
+    "created": {"$ref": "#/$defs/utcDateTime"},
+    "creator": {"$ref": "#/$defs/creator"},
+    "generator": {"$ref": "#/$defs/generator"},
+    "motivation": {"enum": ["commenting", "replying", "editing"]},
+    "body": {
+      "oneOf": [
+        {"$ref": "#/$defs/textualBody"},
+        {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/textualBody"}}
+      ]
+    },
+    "target": {
+      "oneOf": [
+        {"$ref": "#/$defs/uuidIri"},
+        {"$ref": "#/$defs/specificResource"}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"motivation": {"const": "replying"}}, "required": ["motivation"]},
+      "then": {
+        "properties": {
+          "target": {"$ref": "#/$defs/uuidIri"},
+          "body": {"$ref": "#/$defs/commentBody"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"motivation": {"const": "commenting"}}, "required": ["motivation"]},
+      "then": {
+        "properties": {
+          "target": {"$ref": "#/$defs/specificResource"},
+          "body": {"$ref": "#/$defs/commentBody"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"motivation": {"const": "editing"}}, "required": ["motivation"]},
+      "then": {
+        "properties": {
+          "target": {"$ref": "#/$defs/specificResource"},
+          "body": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {"$ref": "#/$defs/textualBody"},
+            "contains": {"type": "object", "required": ["purpose"], "properties": {"purpose": {"const": "editing"}}},
+            "minContains": 1,
+            "maxContains": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuidIri": {
+      "type": "string",
+      "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "utcDateTime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+    },
+    "blobId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "creator": {
+      "type": "object",
+      "required": ["type", "name"],
+      "properties": {
+        "type": {"enum": ["Person", "Software"]},
+        "name": {"type": "string", "minLength": 1},
+        "email": {"type": "string", "pattern": "^mailto:.+$"}
+      }
+    },
+    "generator": {
+      "type": "object",
+      "required": ["type", "name"],
+      "properties": {
+        "type": {"const": "Software"},
+        "name": {"type": "string", "minLength": 1}
+      }
+    },
+    "textualBody": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"const": "TextualBody"},
+        "value": {"type": "string"},
+        "format": {"const": "text/markdown"},
+        "purpose": {"enum": ["editing", "commenting"]}
+      }
+    },
+    "commentBody": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"const": "TextualBody"},
+        "value": {"type": "string", "minLength": 1},
+        "format": {"const": "text/markdown"},
+        "purpose": {"const": "commenting"}
+      }
+    },
+    "specificResource": {
+      "type": "object",
+      "required": ["source", "marq:sourceBlob", "selector"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "marq:sourceBlob": {"$ref": "#/$defs/blobId"},
+        "selector": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "oneOf": [
+              {"$ref": "#/$defs/textQuoteSelector"},
+              {"$ref": "#/$defs/textPositionSelector"},
+              {"$ref": "#/$defs/fragmentSelector"}
+            ]
+          },
+          "contains": {"type": "object", "required": ["type"], "properties": {"type": {"const": "TextQuoteSelector"}}},
+          "minContains": 1,
+          "maxContains": 1,
+          "allOf": [
+            {
+              "contains": {"type": "object", "required": ["type"], "properties": {"type": {"const": "TextPositionSelector"}}},
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ]
+        }
+      }
+    },
+    "textQuoteSelector": {
+      "type": "object",
+      "required": ["type", "exact"],
+      "properties": {
+        "type": {"const": "TextQuoteSelector"},
+        "exact": {"type": "string", "minLength": 1},
+        "prefix": {"type": "string"},
+        "suffix": {"type": "string"}
+      }
+    },
+    "textPositionSelector": {
+      "type": "object",
+      "required": ["type", "start", "end"],
+      "properties": {
+        "type": {"const": "TextPositionSelector"},
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0}
+      }
+    },
+    "fragmentSelector": {
+      "type": "object",
+      "required": ["type", "conformsTo", "value"],
+      "properties": {
+        "type": {"const": "FragmentSelector"},
+        "conformsTo": {"const": "http://tools.ietf.org/rfc/rfc5147"},
+        "value": {"type": "string", "pattern": "^line=(0|[1-9][0-9]*),(0|[1-9][0-9]*)$"}
+      }
+    }
+  }
+}

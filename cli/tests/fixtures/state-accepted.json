@@ -1,0 +1,19 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    {
+      "marq": "https://github.com/jimbarritt/marq/blob/main/doc/comments-design.md#"
+    }
+  ],
+  "created": "2026-09-29T11:20:00Z",
+  "creator": {
+    "email": "mailto:jim@example.com",
+    "name": "Jim",
+    "type": "Person"
+  },
+  "id": "urn:uuid:62673a60-4d24-4d8c-a397-8ebc52dd9743",
+  "marq:annotation": "urn:uuid:dc726d0a-525f-4af7-99e4-4c8737b085e2",
+  "marq:resultBlob": "89cdd87263832ff6cd4a65ae7e0a2f4a4a3c549d",
+  "marq:state": "accepted",
+  "type": "marq:StateChange"
+}

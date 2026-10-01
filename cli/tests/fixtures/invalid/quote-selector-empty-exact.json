@@ -1,0 +1,43 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/anno.jsonld",
+    {
+      "marq": "https://github.com/jimbarritt/marq/blob/main/doc/comments-design.md#"
+    }
+  ],
+  "body": {
+    "format": "text/markdown",
+    "type": "TextualBody",
+    "value": "Is this the right word for a quotation? Blimey."
+  },
+  "created": "2026-09-29T10:15:02Z",
+  "creator": {
+    "email": "mailto:jim@example.com",
+    "name": "Jim",
+    "type": "Person"
+  },
+  "generator": {
+    "name": "marq-comments 0.1.0",
+    "type": "Software"
+  },
+  "id": "urn:uuid:98c1eb4e-e934-4674-b763-878fcb96a25f",
+  "motivation": "commenting",
+  "target": {
+    "marq:sourceBlob": "a6d9e38c431206428083ad87c7b6b39ee26facb7",
+    "selector": [
+      {
+        "exact": "",
+        "prefix": "and `inline code`.\n\n> This is a ",
+        "suffix": " with some wisdom about markdown",
+        "type": "TextQuoteSelector"
+      },
+      {
+        "end": 1314,
+        "start": 1304,
+        "type": "TextPositionSelector"
+      }
+    ],
+    "source": "example-docs/test.md"
+  },
+  "type": "Annotation"
+}
