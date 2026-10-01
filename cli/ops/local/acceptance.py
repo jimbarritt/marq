@@ -478,6 +478,117 @@ def two_clones(c: Ctx) -> None:
     a.render("both-comments")
 
 
+def run_at_once(c: Ctx, repo: Repo, commands: list[tuple[str, ...]], allowed: set[int]) -> list[tuple[int, str, str]]:
+    """Starts every command before waiting for any, records each, and returns
+    (exit code, stdout, stderr) in the order given."""
+    if not c.built.ok:
+        c.events.append(Event("run", "marq-comments (at once)", False, c.built.reason, -1, where=repo.name))
+        raise ScenarioFailed("marq-comments is not built (see Build above)")
+    procs = [subprocess.Popen([str(BINARY), *args], cwd=repo.path, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, env={**os.environ, **GIT_ENV}) for args in commands]
+    results = []
+    for args, proc in zip(commands, procs):
+        out, err = proc.communicate(timeout=60)
+        shown = "marq-comments " + " ".join(a if re.fullmatch(r"[\w./:=@-]+", a) else repr(a) for a in args)
+        ok = proc.returncode in allowed
+        c.events.append(Event("run", shown, ok, "started together with the others", proc.returncode, out, err, repo.name))
+        if not ok:
+            raise ScenarioFailed(f"exit code {proc.returncode}: {shown}")
+        results.append((proc.returncode, out, err))
+    return results
+
+
+def summary(t: dict) -> dict:
+    """What every clone must agree on: id, folded state, state changes in fold
+    order, and the replies in order."""
+    return {"id": t["annotation"]["id"], "state": t["state"],
+            "changes": [s["id"] for s in t["stateChanges"]],
+            "replies": [summary(r) for r in t["replies"]]}
+
+
+@scenario("11-three-clones-decide", "Three clones decide in parallel and converge",
+          "Before any sync, A resolves a comment and accepts a suggestion, B resolves and reopens the same comment, "
+          "and C rejects the suggestion A accepted. After syncing in a mixed order, all three clones fold to the same "
+          "states and list the same history, and listing warns that the suggestion was both accepted and rejected.")
+def three_clones_decide(c: Ctx) -> None:
+    remote = c.tmp / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True,
+                   capture_output=True, env={**os.environ, **GIT_ENV})
+    a = Repo.create(c, "clone-a", remote)
+    b = Repo.clone(c, "clone-b", remote)
+    b.configure("Ana", "ana@example.com")
+    cc = Repo.clone(c, "clone-c", remote)
+    cc.configure("Ben", "ben@example.com")
+    line, _ = a.find("reloading")
+    cid = new_id(c, a.cli("comment", DOC, "--line", str(line), "--text", "reloading", "-m", "Is this the right word?"), "comment")
+    line, _ = a.find("awkward")
+    sid = new_id(c, a.cli("suggest", DOC, "--line", str(line), "--text", "awkward", "--replace", "peculiar",
+                          "-m", "A better word."), "suggestion")
+    for repo in (a, b, cc):
+        repo.cli("sync")
+    c.note("Every clone now has both annotations. No clone syncs again until each has decided.")
+    a.cli("resolve", cid)
+    a.cli("accept", sid)
+    b.cli("resolve", cid)
+    b.cli("reopen", cid)
+    cc.cli("reject", sid)
+    for repo in (cc, b, a, cc, b):
+        repo.cli("sync")
+    agreed = [summary(t) for t in a.threads()]
+    for repo in (b, cc):
+        c.check(f"{repo.name} lists the same threads, states and history as clone-a",
+                [summary(t) for t in repo.threads()] == agreed)
+    t = a.thread(sid)
+    c.check("the suggestion has both an accepted and a rejected change", sorted(states(t)) == ["accepted", "rejected"],
+            str(states(t)))
+    c.check("the suggestion's state is the last change in (created, id) order",
+            t["state"] == sorted(t["stateChanges"], key=lambda s: (s["created"], s["id"]))[-1]["marq:state"])
+    c.check("the comment has three changes: A's resolve, B's resolve and B's reopen", len(a.thread(cid)["stateChanges"]) == 3)
+    for repo in (a, b, cc):
+        repo.cli("list", DOC)
+        c.check(f"listing in {repo.name} warns on standard error that the suggestion was decided both ways",
+                f"suggestion {sid} was both accepted and rejected" in c.events[-1].err, c.events[-1].err)
+    c.check("clone-a's markdown has the accepted edit", "Note the peculiar slugs" in a.read())
+    c.check("clone-c's markdown is unchanged, as it rejected", "Note the awkward slugs" in cc.read())
+    for repo in (a, b, cc):
+        repo.render(repo.name)
+
+
+@scenario("12-twelve-processes", "Twelve processes write at once, and nothing is lost",
+          "Twelve comments started together all land, one commit each, in one line of history. Then six replies and "
+          "six resolves of one comment start together: every reply lands, and exactly one resolve succeeds, because "
+          "a process checks the state and writes the change while it holds the lock.")
+def twelve_processes(c: Ctx) -> None:
+    r = Repo.create(c, "work")
+    lines = [n for n, text in enumerate(r.read().split("\n"), start=1) if text.strip()][:12]
+    c.check("setup: the markdown has twelve non-blank lines", len(lines) == 12, str(len(lines)))
+    results = run_at_once(c, r, [("comment", DOC, "--line", str(n), "-m", f"Comment from process {k + 1}.")
+                                 for k, n in enumerate(lines)], {0})
+    ids = [new_id(c, out, f"process {k + 1}") for k, (_, out, _) in enumerate(results)]
+    threads = r.threads()
+    c.check("all twelve comments are listed",
+            sorted(t["annotation"]["id"].replace("urn:uuid:", "")[:8] for t in threads) == sorted(ids))
+    first, second = ids[0], ids[1]
+    commands = [("reply", first, "-m", f"Reply {k + 1}.") for k in range(6)] + [("resolve", second)] * 6
+    results = run_at_once(c, r, commands, {0, 1})
+    replies, resolves = results[:6], results[6:]
+    c.check("every reply succeeded", all(code == 0 for code, _, _ in replies))
+    c.check("exactly one resolve succeeded", sum(code == 0 for code, _, _ in resolves) == 1,
+            str([code for code, _, _ in resolves]))
+    c.check("the other five were refused because the comment was already resolved",
+            all("it is resolved, not open" in err for code, _, err in resolves if code != 0))
+    threads = r.threads()
+    c.check("the first comment has six replies", len(r.thread(first, threads)["replies"]) == 6)
+    c.check("the second comment has one state change", states(r.thread(second, threads)) == ["resolved"])
+    count = r.git("rev-list", "--count", "refs/heads/md-comments").strip()
+    c.check("md-comments has one commit per write: 12 comments, 6 replies, 1 resolve", count == "19", count)
+    merges = r.git("rev-list", "--merges", "refs/heads/md-comments").strip()
+    c.check("the history is one line, with no merge", merges == "", merges)
+    r.git("fsck", "--strict", "--no-progress")
+    c.check("git fsck is clean", True)
+    r.render("twelve")
+
+
 # --- running and reporting ---------------------------------------------------
 
 
