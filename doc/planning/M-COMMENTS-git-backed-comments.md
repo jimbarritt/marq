@@ -135,7 +135,7 @@ Jim decides:
 | T-02 | Write the design doc | [`doc/comments-design.md`](../comments-design.md) complete, one reason per decision | none | T-01 | DONE |
 | T-03 | Write the JSON Schema | Schemas for an annotation and a state change in `cli/schema/`; fixtures in `cli/tests/fixtures/` validate (design 3, 7) | none | T-02 | TODO |
 | T-04 | Build the storage layer | Crate scaffold in `cli/`; write, read and `sync` on `md-comments` through a temporary index, never touching the working tree (design 2) | none | T-02 | TODO |
-| T-05 | Build anchoring | Selector creation, the four-step resolve, the floor; one test per row of design 4.4 | none | T-02 | TODO |
+| T-05 | Build anchoring | Selector creation, the resolve steps including `changed` (design 4.2), the context floor; one test per row of design 4.4 | none | T-02 | TODO |
 | T-06 | Build the CLI commands | `comment`, `reply`, `suggest`, `list`, `show`, `resolve`, `reopen`, `accept`, `reject`, with text and JSON output and the exit codes (design 5, 6) | none | T-03, T-04, T-05 | TODO |
 | T-07 | Prove parallel writes | Two clones against a bare remote, both `sync`, no lost annotation, including parallel state changes on one annotation | none | T-06 | TODO |
 | T-08 | Document agent use | A section an agent reads to use the CLI, ready to paste into `CLAUDE.md` | none | T-06 | TODO |
