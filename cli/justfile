@@ -1,0 +1,25 @@
+# marq-comments: git-backed comments and suggestions for markdown
+
+default:
+    @just --list
+
+# Build the CLI
+build:
+    cargo build
+
+# Unit and integration tests
+test:
+    cargo test
+
+# The page is the thing to read. It has one section per scenario, with the
+# commands run, what they printed, each check, and the rendered result. The run
+# exits non-zero while any scenario fails, so it also measures progress while the
+# CLI is being built. Flags: --only SLUG, --no-build, --open.
+
+# Run the scenarios and write target/acceptance/index.html
+acceptance *FLAGS:
+    python3 ops/local/acceptance.py {{FLAGS}}
+
+# Run the scenarios, then open the page
+acceptance-open:
+    python3 ops/local/acceptance.py --open

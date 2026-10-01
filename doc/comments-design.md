@@ -239,7 +239,7 @@ The steps:
 1. **Unchanged file.** The current blob id equals `marq:sourceBlob`, and the text at the position equals the quote: anchored.
 2. **Mapped position.** Read the recorded version from `versions/<blob id>`, run a line diff (`similar`) from it to the current text, and map the recorded start line to the current file. If that line is unchanged and the text at the mapped position equals the quote: anchored. The mapped position is also the hint for step 3.
 3. **Quote search.** Find every exact occurrence of the quote. For each, score its context: the number of code points by which the text before it ends with the stored `prefix`, plus the number by which the text after it starts with the stored `suffix`. Discard candidates below the floor (4.3). Pick the highest score, then the nearest to the hint, then the lowest offset: anchored.
-4. **Changed in place.** If the diff in step 2 shows the recorded line replaced (a hunk with old and new lines, not a pure deletion), take the new line at the same index within the hunk. For a line anchor, that whole line is the range: changed. For a word anchor, compare the old line and the new line: the range is the new text between their common prefix and their common suffix, where the word stood. If that range is not empty: changed.
+4. **Changed in place.** If the diff in step 2 shows the recorded line replaced (a hunk with old and new lines, not a pure deletion), take the new line at the same index within the hunk. For a line anchor, that whole line is the range: changed. For a word anchor, compare the old line and the new line. Take the text that differs: the new text after their common prefix and before their common suffix, where the suffix is not allowed to overlap the prefix. Widen it to the enclosing run of non-whitespace characters. If the widened range is not empty: changed.
 5. Otherwise: **orphaned**. This covers a deleted line, a hunk that shrank past the recorded line, and a word removed with nothing in its place.
 
 For a line anchor, step 3 compares whole lines equal to the quote.
@@ -249,7 +249,8 @@ For a line anchor, step 3 compares whole lines equal to the quote.
 | The quote must match exactly in steps 1 to 3; no fuzzy match on the anchored text | Only exact text proves an anchor is the same words; fuzzy matching re-attached anchors to wrong text in Hypothesis (T-01). |
 | A separate `changed` status, reached only through the line diff | Jim's decision (2026-09-29): a typo fix or a reworded line must not lose the comment. The diff locates the place by position in the file's history, not by guessing at similar text, and the status tells the reader the text differs from the quote. |
 | `changed` carries the original quote | The reader compares what the comment was about with what stands there now. |
-| A word removed with nothing in its place orphans | The brief requires removed anchored text to report as orphaned. |
+| The range is widened to the enclosing run of non-whitespace | A typo fix often changes the middle of a word, or deletes one letter, and the differing text alone would be a fragment or empty. Widening gives the whole corrected word. |
+| A word removed with nothing in its place orphans | The brief requires removed anchored text to report as orphaned. Widening a position that sits between two spaces finds no characters, so the range is empty. |
 | Context scoring accepts partial matches | Nearby edits often trim a few characters of context, and that must not orphan an anchor whose own text is intact. |
 | The position mapped through a line diff, before any search | It is the strongest evidence that a candidate is the same text, and it separates a moved duplicate from the original. |
 | Status is computed on every read and never stored | The markdown changes without the CLI's involvement, so a stored status goes stale; Hypothesis computes it the same way (T-01). |
@@ -346,15 +347,26 @@ Text by default, one thread per block:
 An orphan prints `orphaned` in place of `file:line:column`, with the stored quote.
 A changed anchor prints `changed` after the location, then `was "<original quote>"`.
 
-`--json` prints one object per thread: the stored annotation unchanged, then
-`state`, `anchor` (`{"status": "anchored", "start", "end", "line", "column"}` or
-`{"status": "changed", ..., "original"}` or `{"status": "orphaned"}`),
-`stateChanges`, and `replies` in the same shape.
+`comment`, `reply` and `suggest` print the new annotation's 8-character id on one
+line and nothing else, so a script can capture it. The other commands print
+nothing on success.
+
+`--json` prints one JSON array, one object per thread. Each object has:
+
+| Key | Value |
+|---|---|
+| `annotation` | The stored annotation, unchanged |
+| `state` | `open`, `resolved`, `accepted` or `rejected` |
+| `anchor` | `{"status": "anchored", "start", "end", "line", "column", "text"}`; or `{"status": "changed", ..., "text", "original"}`; or `{"status": "orphaned"}`. `text` is the text of the range |
+| `stateChanges` | The stored state-change records, unchanged, in fold order |
+| `replies` | Thread objects in this same shape, in `created` order |
 
 | Decision | Reason |
 |---|---|
 | JSON output embeds the stored annotation unchanged, with computed fields beside it | A consumer gets the W3C record as stored, and the computed fields never mix into it. |
 | Lines and columns are 1-based in output | Editors and `file:line:col` links count from 1. |
+| The three creating commands print only the id | A script or an agent takes the output as the id, with no parsing. |
+| `list --json` is one array, not one object per line | One `json.loads` reads it, and an empty file gives `[]`. |
 
 ### 6.3 Ids and exit codes
 
@@ -385,13 +397,19 @@ Reason: scripts and agents branch on the cause without parsing messages.
 
 ### 7.1 The acceptance run
 
-`cd cli && just acceptance` builds the CLI and runs
-`cli/ops/local/acceptance.py`. The script copies `example-docs/test.md` into a
-temporary git repository, runs the scenarios below with the real binary, and
-writes `cli/target/acceptance/index.html`: one section per scenario, with the
+`cd cli && just acceptance` runs `cli/ops/local/acceptance.py`. The script runs
+`cargo build`, copies `example-docs/test.md` into a temporary git repository,
+runs the scenarios below with the real binary, and writes `cli/target/acceptance/index.html`: one section per scenario, with the
 `marq-comments render` page and the `list` output for that step. It prints the
 path. `just acceptance-open` also opens the page (`open` on macOS, `xdg-open` on
-Linux).
+Linux). The exit code is 0 when every scenario passes and 1 otherwise.
+
+The run exists before the CLI does. While the crate is missing, or a command is
+not written, a scenario stops at its first failed check and says which one, so
+the count of passing scenarios measures progress. `--only 07` runs the scenarios
+whose slug contains `07`, and `--no-build` skips `cargo build`. Setting
+`MARQ_COMMENTS_BIN` to another binary skips the build and runs against that
+binary, which is how the harness itself is tested.
 
 | Scenario | What the page shows |
 |---|---|
@@ -413,7 +431,9 @@ Linux).
 | The script lives at `cli/ops/local/` | Jim's layout for scripts run on a local machine. |
 | The example is `example-docs/test.md`, moved from `macos/examples/` to the repo root | The app and the CLI both use it, so it belongs to neither directory. |
 | Scenarios run on a copy in a temporary repository | The acceptance run never changes `example-docs/` or this repository's `md-comments` branch. |
-| Output under `cli/target/` | Cargo already ignores `target/`, so nothing generated reaches a commit. |
+| Output under `cli/target/`, ignored by `cli/.gitignore` | Nothing generated reaches a commit. |
+| The first failed check stops a scenario | Later steps use ids and state from the earlier ones, so continuing would report noise. |
+| The scenarios find their lines and words in `test.md` by text | Editing the example document does not break them, unless a word they use disappears; a setup check says so. |
 
 ## 8. Known limits
 

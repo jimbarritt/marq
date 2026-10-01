@@ -4,7 +4,7 @@
 
 - **Next:** Mission [M-COMMENTS](M-COMMENTS-git-backed-comments.md) — git-backed comments and suggestions for markdown
 - **Sub-doc:** [M-COMMENTS-git-backed-comments.md](M-COMMENTS-git-backed-comments.md) — the mission owns its own task breakdown (T-00 onward)
-- **Blockers:** T-13 moved `macos/examples/` to `example-docs/` at the repo root; Jim confirms `cd macos && just check` still passes. T-03 (JSON Schema), T-04 (storage) and T-05 (anchoring) do not depend on it and start next. The design is [doc/comments-design.md](../comments-design.md).
+- **Blockers:** None. Jim to confirm `cd macos && just check` still passes after T-13 moved `macos/examples/` to `example-docs/`. The acceptance run exists (T-14): `cd cli && just acceptance`, 0 of 10 scenarios pass. T-03, T-04 and T-05 start next, and each one's measure is the acceptance count. Design: [doc/comments-design.md](../comments-design.md).
 - **Context:** See [Delta: Git-backed Comments](#delta-git-backed-comments-mission-m-comments) below
 - **Before verifying any layout change:** `just problems`, then `just check`. See the `/verify` skill.
 

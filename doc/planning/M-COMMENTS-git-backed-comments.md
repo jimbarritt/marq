@@ -142,7 +142,7 @@ Jim decides:
 | T-09 | Update `doc/planning/plan.md` | A delta for this mission with its tasks and status | none | T-02 | DONE |
 | T-10 | Build `render` | The static HTML page of design 6.1, checked by a test on a fixture | none | T-05, T-06 | TODO |
 | T-13 | Move `macos/examples/` to `example-docs/` | The example docs at the repo root for the app and the CLI; `macos/justfile` and `check-metrics.py` updated | none | T-02 | DONE, awaiting Jim's `cd macos && just check` |
-| T-14 | Build the acceptance run | `cli/justfile` and `cli/ops/local/acceptance.py`; `just acceptance` writes the scenario page of design 7.1 | none | T-06, T-10, T-13 | TODO |
+| T-14 | Build the acceptance run | `cli/justfile` and `cli/ops/local/acceptance.py`; `just acceptance` writes the scenario page of design 7.1. Written first, so it fails now and counts progress | none | T-13 | DONE: 0 of 10 scenarios pass until T-04 to T-10 land |
 | T-11 | Confirm on macOS | Jim runs `cd cli && just test && just acceptance` on macOS, both pass, and the page shows the expected results | Jim | T-07, T-14 | TODO |
 | T-12 | Write the completion report | `doc/planning/M-COMMENTS/M-COMMENTS-git-backed-comments-report.md`, as the brief specifies | none | T-11 | TODO |
 
@@ -174,6 +174,13 @@ re-anchor to the wrong text instead of orphaning. The four analyses re-read
 for what each contributes past the brief's own summary: none of the four
 models resolved-comment history, so that part of T-02 is original design, not
 adaptation.
+
+**T-14 note**: the acceptance run is test-first. `cd cli && just acceptance` runs ten
+scenarios and writes `cli/target/acceptance/index.html`. With no crate yet, all ten fail with
+the reason, which is the correct state. The harness was checked against a throwaway stub for the
+pass path (scenario 02) and for failures deep inside scenarios 05 to 08. Passing scenarios is the
+measure of progress for T-04 to T-10. T-06 and T-10 are not done until the scenarios that use
+them pass.
 
 **T-02 note**: [`doc/comments-design.md`](../comments-design.md). Two git mechanics
 were measured on git 2.43 before the design relied on them: a write through a
