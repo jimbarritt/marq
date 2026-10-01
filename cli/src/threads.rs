@@ -86,6 +86,42 @@ impl<'a> Resolver<'a> {
     }
 }
 
+/// The anchor of an accepted suggestion. The text it quoted is the text the
+/// accept replaced, so resolving the stored quote reports `changed` forever.
+/// Instead the replacement is anchored: its selectors are made from the edited
+/// file the accept recorded, then resolved against the current text like any
+/// other anchor, so a later edit gives `changed` or `orphaned` as usual.
+///
+/// A deletion, or an accept recorded without `marq:resultStart`, has no text to
+/// anchor to and reports `applied`, with no location.
+fn accepted_anchor(
+    store: &Store,
+    key: &str,
+    current: &str,
+    annotation: &Value,
+    accepted: &Value,
+) -> Value {
+    let applied = || json!({"status": "applied"});
+    let (Some(blob), Some(start), Some(replacement)) = (
+        model::result_blob(accepted),
+        model::result_start(accepted),
+        model::suggestion_text(annotation),
+    ) else {
+        return applied();
+    };
+    let length = text::char_len(replacement);
+    let Ok(edited) = store.read_version(key, blob) else {
+        return applied();
+    };
+    match anchor::selectors_for_range(&edited, start, start + length) {
+        Ok(selectors) if length > 0 => anchor_value(
+            &anchor::resolve(&selectors, Some(&edited), current),
+            current,
+        ),
+        _ => applied(),
+    }
+}
+
 /// The anchor as the JSON of design 6.2.
 pub fn anchor_value(anchor: &Anchor, current: &str) -> Value {
     let located = |start: usize, end: usize| -> Option<(usize, usize, usize, usize, String)> {
@@ -160,13 +196,20 @@ pub fn build(store: &Store, key: &str, current: &str) -> Result<Vec<Value>> {
     let mut roots = Vec::new();
     for annotation in records.annotations.iter().filter(|a| is_root(a)) {
         let id = model::id(annotation).unwrap_or("");
-        let anchor = anchor_value(&resolver.resolve(annotation), current);
         let own: &[&Value] = changes_of.get(id).map_or(&[], Vec::as_slice);
         let state = own
             .last()
             .and_then(|s| model::state(s))
             .unwrap_or(OPEN)
             .to_string();
+        let anchor = match own.last() {
+            Some(last)
+                if state == "accepted" && model::motivation(annotation) == Some("editing") =>
+            {
+                accepted_anchor(store, key, current, annotation, last)
+            }
+            _ => anchor_value(&resolver.resolve(annotation), current),
+        };
         let changes: Vec<Value> = own.iter().map(|s| (*s).clone()).collect();
         seen.insert(id.to_string());
         let replies = replies_of(id, &children, &state, &anchor, &mut seen);

@@ -23,6 +23,7 @@
     "marq:annotation": {"$ref": "#/$defs/uuidIri"},
     "marq:state": {"enum": ["open", "resolved", "accepted", "rejected"]},
     "marq:resultBlob": {"$ref": "#/$defs/blobId"},
+    "marq:resultStart": {"type": "integer", "minimum": 0},
     "created": {"$ref": "#/$defs/utcDateTime"},
     "creator": {"$ref": "#/$defs/creator"},
     "generator": {"$ref": "#/$defs/generator"}

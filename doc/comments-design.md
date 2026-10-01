@@ -225,13 +225,15 @@ Stored under `states/`, not `annotations/`:
 ```
 
 An `accepted` state change also carries `marq:resultBlob`, the blob id of the
-markdown file after the edit.
+markdown file after the edit, and `marq:resultStart`, the code-point offset at
+which the replacement text starts in that file.
 
 | Decision | Reason |
 |---|---|
 | A state change is its own file in the extension vocabulary, not an edit to the annotation | Section 2.1: no file is modified, so two clones that change one annotation's state still merge clean, and every earlier state stays in the tree as well as in history. |
 | A state change carries the same `@context`, `id`, `created` and `creator` as an annotation; `generator` is optional on both | A state change is a record of who did what and when, so it needs the same provenance. |
 | `marq:resultBlob` is required on `accepted` and allowed on no other state | An accepted suggestion must record the text its edit produced. |
+| `marq:resultStart` is an optional non-negative integer on `accepted` | With the result blob it lets a reader anchor the accepted suggestion to the text it put in the file. Records written without it still read. |
 | The annotation file carries no state property | A W3C consumer then reads a valid annotation, and the state lives only where the fold in section 5 reads it. |
 | `marq:resultBlob` on `accepted` | It records exactly which text the accepted edit produced. |
 
@@ -282,6 +284,27 @@ For a line anchor, step 3 compares whole lines equal to the quote.
 | Context scoring accepts partial matches | Nearby edits often trim a few characters of context, and that must not orphan an anchor whose own text is intact. |
 | The position mapped through a line diff, before any search | It is the strongest evidence that a candidate is the same text, and it separates a moved duplicate from the original. |
 | Status is computed on every read and never stored | The markdown changes without the CLI's involvement, so a stored status goes stale; Hypothesis computes it the same way (T-01). |
+
+### 4.2.1 An accepted suggestion
+
+The text a suggestion quotes is the text the accept replaced, so resolving that
+quote against the edited file reports `changed` for ever. An accepted suggestion is
+therefore anchored to its replacement instead. The reader reads the edited file
+from `versions/<marq:resultBlob>`, makes selectors for the range
+`[marq:resultStart, marq:resultStart + length of the replacement)`, and resolves
+them against the current text, with that edited file as the recorded text. The
+result is `anchored` at the replacement, and a later edit gives `changed` or
+`orphaned` by the rules of 4.2.
+
+A deletion has no replacement text, and a record without `marq:resultStart` has
+no position. Both report `{"status": "applied"}`: the edit is in the file and
+there is no location to show.
+
+| Decision | Reason |
+|---|---|
+| Anchor an accepted suggestion to its replacement | Jim's decision (2026-10-01): an accepted suggestion read as `changed`, which looked like a fault. The replacement is what is now in the file, and the same anchoring rules then apply. |
+| A fourth status, `applied`, for a deletion | There is nothing left to quote, and `orphaned` would suggest the suggestion was lost. |
+| The result is computed on every read, as for other anchors | The file changes without the CLI's involvement. |
 
 ### 4.3 The floor
 
@@ -379,7 +402,7 @@ Text by default, one thread per block:
     Obsidian plugins ship one CJS file.
 ```
 
-An anchored thread prints `file:line:column` and the anchored text in quotes. A changed one prints the new text, then `changed`, then `was "<original quote>"`. An orphan prints `orphaned` in place of the location, then the stored quote. A suggestion adds a line `replace with "NEW"` before its reason. `show` appends a `state changes:` list. Quotes are not escaped.
+An anchored thread prints `file:line:column` and the anchored text in quotes. A changed one prints the new text, then `changed`, then `was "<original quote>"`. An orphan prints `orphaned` in place of the location, then the stored quote. An accepted deletion prints `applied`. A suggestion adds a line `replace with "NEW"` before its reason. `show` appends a `state changes:` list. Quotes are not escaped.
 
 `comment`, `reply` and `suggest` print the new annotation's 8-character id on one
 line and nothing else, so a script can capture it. The other commands print
@@ -391,7 +414,7 @@ nothing on success.
 |---|---|
 | `annotation` | The stored annotation, unchanged |
 | `state` | `open`, `resolved`, `accepted` or `rejected` |
-| `anchor` | `{"status": "anchored", "start", "end", "line", "column", "text"}`; or `{"status": "changed", ..., "text", "original"}`; or `{"status": "orphaned"}`. `text` is the text of the range |
+| `anchor` | `{"status": "anchored", "start", "end", "line", "column", "text"}`; or `{"status": "changed", ..., "text", "original"}`; or `{"status": "orphaned"}`; or `{"status": "applied"}` for an accepted deletion. `text` is the text of the range |
 | `stateChanges` | The stored state-change records, unchanged, in fold order |
 | `replies` | Thread objects in this same shape, in `created` order. A reply object carries its root's `state` and a copy of its root's `anchor`, and its `stateChanges` is `[]` |
 
@@ -491,4 +514,4 @@ binary, which is how the harness itself is tested.
 - **`flock` is not reliable on network filesystems.**
 - **`git gc --prune=now` during a write** could remove a blob before its commit lands.
 - **Writes in one repository are serialised**, at about 31 ms each in a debug build.
-- **An accepted suggestion lists as `changed`**, because its quoted text is the text the accepted edit replaced. The guide tells agents to ignore the anchor of an accepted suggestion. Showing `accepted` and no anchor would be clearer.
+- **A deleted line next to a different added line** reads as a rewrite of the line, because the line diff pairs them, so the anchor is `changed` on the new line, not `orphaned`.

@@ -553,7 +553,8 @@ fn accept(store: &Store, who: &Who, id: &str) -> Outcome {
     std::fs::write(&path, edited.as_bytes())
         .map_err(|e| Error::message(format!("cannot write {key}: {e}")))?;
     let result_blob = store.hash_file(&path)?;
-    let mut change = model::new_state_change(&creator, &full_id, "accepted", Some(&result_blob));
+    let change = model::new_state_change(&creator, &full_id, "accepted", Some(&result_blob));
+    let mut change = model::with_result_start(change, start);
     order_after_earlier_changes(store, &key, &full_id, &mut change)?;
     store
         .write_state(&key, &change, Some(&result_blob))

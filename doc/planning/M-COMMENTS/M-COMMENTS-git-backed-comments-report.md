@@ -107,8 +107,14 @@ Process mistakes, all mine, all corrected in later commits:
 - **A real translated git**, and **a stale `refs/heads/md-comments.lock` from a real kill**: proven only with a fake `git` and a hand-made lock file.
 - **`flock` on a network filesystem.** Documented as unreliable, not tested.
 
+## After the report
+
+On 2026-10-01 Jim asked for the accepted-suggestion display to be fixed, and it was. Until then an accepted suggestion listed as `changed`. It is now
+anchored to the text it put in the file, using a new `marq:resultStart` on the `accepted` state change. A deletion reports `applied`. Four tests, an
+extended acceptance scenario 03 and the render page cover it. Scenario 03's new checks fail on the previous binary and pass on this one.
+
 ## Limits that remain
 
-The design's section 8 lists them. The ones a person will meet first: an accepted suggestion lists as `changed`; two clones deciding in the same
+The design's section 8 lists them. The ones a person will meet first: two clones deciding in the same
 second order by random id, identically on every clone; renamed files keep their comments under the old path; CRLF working copies change positions
 between clones; every write in one repository takes the lock, about 31 ms each in a debug build.

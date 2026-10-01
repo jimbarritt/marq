@@ -62,8 +62,9 @@ positions already. A blank line cannot carry a comment.
 | `changed` | The quoted text is gone and other text stands in its place. The line shows the new text and `was "<old>"`. | Read the comment against the new text. The comment may be done already, or no longer apply. Reply to say which. |
 | `orphaned` | No location. The quote is printed with no line. | Reply with what you did. Never re-comment to attach it somewhere else. |
 
-`accept` refuses a suggestion that is not `anchored` and exits 3. An accepted
-suggestion reports `changed` afterwards: ignore its anchor.
+`accept` refuses a suggestion that is not `anchored` and exits 3. After `accept`,
+the suggestion is anchored on the text it put in the file. An accepted deletion
+reports `applied`, with no location.
 
 ### Rules
 
@@ -106,7 +107,7 @@ One JSON array, one object per thread, `[]` when empty. Abridged:
 - `annotation.motivation`: `commenting`, `editing` (a suggestion) or `replying`.
 - `annotation.body`: for a suggestion, an array. The body with `"purpose": "editing"` holds the replacement text.
 - `state`: `open`, `resolved`, `accepted` or `rejected`. A reply carries its root's state.
-- `anchor.status`: `anchored`, `changed` or `orphaned`. `orphaned` has no other anchor key.
+- `anchor.status`: `anchored`, `changed`, `orphaned` or `applied`. `orphaned` and `applied` have no other anchor key.
 - `anchor.line` and `anchor.column`: 1-based. `anchor.text`: the text now at the anchor.
 - `anchor.original`: on `changed` only, the text the comment was written against.
 - `replies`: threads in the same shape, oldest first.

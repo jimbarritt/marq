@@ -31,7 +31,8 @@ pub fn render_page(markdown: &str, threads: &[Value]) -> String {
         .filter(|v| v.status == Status::Anchored)
         .count();
     let changed = views.iter().filter(|v| v.status == Status::Changed).count();
-    let orphaned = views.iter().filter(|v| v.range.is_none()).count();
+    let applied = views.iter().filter(|v| v.status == Status::Applied).count();
+    let orphaned = views.iter().filter(|v| v.range.is_none()).count() - applied;
 
     let mut placed: Vec<&View> = views.iter().filter(|v| v.range.is_some()).collect();
     // Cards follow the order of the text they point at, then creation time, so
@@ -53,8 +54,13 @@ pub fn render_page(markdown: &str, threads: &[Value]) -> String {
     };
     let _ = writeln!(
         out,
-        "<p class=\"summary\">{} {noun}: {anchored} anchored, {changed} changed, {orphaned} orphaned</p>",
+        "<p class=\"summary\">{} {noun}: {anchored} anchored, {changed} changed, {orphaned} orphaned{}</p>",
         views.len(),
+        if applied > 0 {
+            format!(", {applied} applied")
+        } else {
+            String::new()
+        },
     );
     out.push_str("</header>\n<main>\n<div class=\"layout\">\n<section class=\"source-pane\" aria-label=\"Source\">\n");
     out.push_str("<div class=\"source-box\">\n");
@@ -83,7 +89,14 @@ pub fn render_page(markdown: &str, threads: &[Value]) -> String {
 
     if orphaned > 0 {
         out.push_str("<section class=\"orphans\">\n<h2>Orphaned comments</h2>\n");
-        for view in views.iter().filter(|v| v.range.is_none()) {
+        for view in views.iter().filter(|v| v.status == Status::Orphaned) {
+            write_card(&mut out, view, markdown);
+        }
+        out.push_str("</section>\n");
+    }
+    if applied > 0 {
+        out.push_str("<section class=\"orphans\">\n<h2>Applied deletions</h2>\n");
+        for view in views.iter().filter(|v| v.status == Status::Applied) {
             write_card(&mut out, view, markdown);
         }
         out.push_str("</section>\n");
@@ -96,6 +109,8 @@ pub fn render_page(markdown: &str, threads: &[Value]) -> String {
 enum Status {
     Anchored,
     Changed,
+    /// An accepted suggestion with no text left to point at: a deletion.
+    Applied,
     Orphaned,
 }
 
@@ -116,9 +131,10 @@ impl<'a> View<'a> {
         let mut status = match anchor["status"].as_str() {
             Some("anchored") => Status::Anchored,
             Some("changed") => Status::Changed,
+            Some("applied") => Status::Applied,
             _ => Status::Orphaned,
         };
-        let range = if status == Status::Orphaned {
+        let range = if matches!(status, Status::Orphaned | Status::Applied) {
             None
         } else {
             match (anchor["start"].as_u64(), anchor["end"].as_u64()) {
@@ -159,6 +175,7 @@ impl<'a> View<'a> {
         match self.status {
             Status::Anchored => "anchored",
             Status::Changed => "changed",
+            Status::Applied => "applied",
             Status::Orphaned => "orphaned",
         }
     }
@@ -282,6 +299,9 @@ fn write_card(out: &mut String, view: &View, markdown: &str) {
                     ""
                 }
             );
+        }
+        None if view.status == Status::Applied => {
+            out.push_str(" <span class=\"flag\">applied</span>")
         }
         None => out.push_str(" <span class=\"flag\">orphaned</span>"),
     }

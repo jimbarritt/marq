@@ -1247,3 +1247,117 @@ fn render_writes_a_page_to_a_file_or_to_stdout() {
     assert!(stdout.ok().out.contains("<html") || stdout.out.contains("<!doctype"));
     marq(repo.path(), &["render", "doc/missing.md"]).fails(1);
 }
+
+// ---- an accepted suggestion anchors to the text it put in the file ----
+
+fn suggest_replacing(repo: &TestRepo, line: &str, word: &str, replacement: &str) -> String {
+    marq(
+        repo.path(),
+        &[
+            "suggest",
+            DOC,
+            "--line",
+            line,
+            "--text",
+            word,
+            "--replace",
+            replacement,
+        ],
+    )
+    .ok()
+    .out
+    .trim()
+    .to_string()
+}
+
+#[test]
+fn an_accepted_suggestion_anchors_to_its_replacement() {
+    let repo = repo();
+    let id = suggest_replacing(&repo, "3", "esbuild", "rollup");
+    marq(repo.path(), &["accept", &id]).ok();
+    let thread = thread_of(&repo, &id);
+    assert_eq!(thread["state"], "accepted");
+    let anchor = &thread["anchor"];
+    assert_eq!(anchor["status"], "anchored", "{anchor}");
+    assert_eq!(anchor["text"], "rollup");
+    assert_eq!(
+        (anchor["line"].as_u64(), anchor["column"].as_u64()),
+        (Some(3), Some(16))
+    );
+    let text = marq(repo.path(), &["list", DOC]).ok().out.clone();
+    assert!(text.contains("\"rollup\""), "{text}");
+    assert!(!text.contains("changed"), "{text}");
+}
+
+#[test]
+fn an_accepted_suggestion_follows_its_replacement_through_later_edits() {
+    let repo = repo();
+    let id = suggest_replacing(&repo, "3", "esbuild", "rollup");
+    marq(repo.path(), &["accept", &id]).ok();
+
+    // Text added above shifts the replacement; the anchor follows it.
+    let edited = std::fs::read_to_string(repo.path().join(DOC)).unwrap();
+    repo.write(
+        DOC,
+        &edited.replace("# Plan\n", "# Plan\n\nA new paragraph.\n"),
+    );
+    let anchor = thread_of(&repo, &id)["anchor"].clone();
+    assert_eq!(anchor["status"], "anchored", "{anchor}");
+    assert_eq!(
+        (anchor["text"].as_str(), anchor["line"].as_u64()),
+        (Some("rollup"), Some(5))
+    );
+
+    // The replacement itself edited: changed, with the replacement as the original.
+    let edited = std::fs::read_to_string(repo.path().join(DOC)).unwrap();
+    repo.write(DOC, &edited.replace("rollup", "rolup"));
+    let anchor = thread_of(&repo, &id)["anchor"].clone();
+    assert_eq!(anchor["status"], "changed", "{anchor}");
+    assert_eq!(anchor["original"], "rollup");
+}
+
+#[test]
+fn an_accepted_suggestion_whose_line_is_deleted_is_orphaned() {
+    // Deleting the line is orphaned. Rewriting it in place would be `changed`
+    // (design 4.2 step 4), and so would deleting it next to a different line that
+    // was added at the same place, because the line diff reads that as a rewrite.
+    let repo = repo();
+    let id = suggest_replacing(&repo, "3", "esbuild", "rollup");
+    marq(repo.path(), &["accept", &id]).ok();
+    let edited = std::fs::read_to_string(repo.path().join(DOC)).unwrap();
+    repo.write(
+        DOC,
+        &edited.replace("The build uses rollup for bundling.\n\n", ""),
+    );
+    assert_eq!(thread_of(&repo, &id)["anchor"]["status"], "orphaned");
+}
+
+#[test]
+fn an_accepted_deletion_reports_applied_with_no_location() {
+    let repo = repo();
+    let id = suggest_replacing(&repo, "5", "fast", "");
+    marq(repo.path(), &["accept", &id]).ok();
+    let thread = thread_of(&repo, &id);
+    assert_eq!(thread["state"], "accepted");
+    assert_eq!(thread["anchor"], serde_json::json!({"status": "applied"}));
+    let text = marq(repo.path(), &["list", DOC]).ok().out.clone();
+    assert!(text.contains("applied"), "{text}");
+    let page = marq(repo.path(), &["render", DOC]).ok().out.clone();
+    assert!(page.contains("Applied deletions"), "{page}");
+    assert!(page.contains("1 applied"), "{page}");
+    assert!(!page.contains("Orphaned comments"), "{page}");
+}
+
+#[test]
+fn an_accepted_state_change_records_where_the_replacement_starts() {
+    let repo = repo();
+    let id = suggest_replacing(&repo, "3", "esbuild", "rollup");
+    marq(repo.path(), &["accept", &id]).ok();
+    let change = &thread_of(&repo, &id)["stateChanges"][0];
+    assert_eq!(change["marq:state"], "accepted");
+    let edited = std::fs::read_to_string(repo.path().join(DOC)).unwrap();
+    let start = change["marq:resultStart"].as_u64().unwrap() as usize;
+    let at: String = edited.chars().skip(start).take(6).collect();
+    assert_eq!(at, "rollup");
+    validate_branch(&repo);
+}

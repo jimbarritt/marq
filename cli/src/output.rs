@@ -114,6 +114,7 @@ fn location(thread: &Value, annotation: &Value, key: &str) -> String {
             quoted(text_of(anchor)),
             quoted(anchor["original"].as_str().unwrap_or(""))
         ),
+        Some("applied") => "applied".to_string(),
         _ => {
             let quote = threads::selectors_of(annotation).map_or(String::new(), |s| s.exact);
             if model::motivation(annotation) == Some("replying") {

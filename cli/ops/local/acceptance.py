@@ -320,6 +320,7 @@ def line_comment(c: Ctx) -> None:
 
 @scenario("03-suggestion-accepted", "A suggestion, accepted",
           "Accepting edits the markdown on the working branch and changes the state to accepted. "
+          "The accepted suggestion is anchored on the text it put in the file. "
           "Nothing is committed to the working branch. An accepted suggestion cannot reopen.")
 def suggestion_accepted(c: Ctx) -> None:
     r = Repo.create(c, "work")
@@ -334,6 +335,13 @@ def suggestion_accepted(c: Ctx) -> None:
     c.check("the markdown now says peculiar", "Note the peculiar slugs" in r.read())
     c.check("the markdown no longer says awkward in that place", "Note the awkward slugs" not in r.read())
     c.check("the state is accepted", r.thread(sid)["state"] == "accepted")
+    after = r.thread(sid)["anchor"]
+    c.check("the accepted suggestion is anchored on the replacement, not changed",
+            after["status"] == "anchored" and after["text"] == "peculiar", json.dumps(after))
+    c.check("the anchor sits at the replacement's line and column",
+            (after["line"], after["column"]) == r.find("peculiar"), f'{after.get("line")}:{after.get("column")}')
+    listed = r.cli("list", DOC)
+    c.check("the text output shows the replacement and no changed flag", '"peculiar"' in listed and "changed" not in listed, listed[:200])
     c.check("the edit is in the working tree, uncommitted", r.git("status", "--porcelain").strip() == f"M {DOC}",
             r.git("status", "--porcelain"))
     c.check("no commit was made on main", r.git("log", "--format=%s").strip() == "Add test document")

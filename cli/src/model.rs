@@ -281,6 +281,21 @@ pub fn new_state_change(
     Value::Object(map)
 }
 
+/// Records, on an `accepted` state change, the code-point offset at which the
+/// replacement text starts in the edited file. With `marq:resultBlob` it lets a
+/// reader anchor the accepted suggestion to the text it put there.
+pub fn with_result_start(mut change: Value, start: usize) -> Value {
+    if let Some(map) = change.as_object_mut() {
+        map.insert("marq:resultStart".into(), json!(start));
+    }
+    change
+}
+
+/// The offset set by [`with_result_start`].
+pub fn result_start(record: &Value) -> Option<usize> {
+    record.get("marq:resultStart")?.as_u64().map(|n| n as usize)
+}
+
 /// Replaces `id` and `created`, for tests and tools that need a fixed record.
 pub fn stamp(record: &mut Value, id: &str, created: &str) {
     if let Some(map) = record.as_object_mut() {
