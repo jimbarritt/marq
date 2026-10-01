@@ -107,9 +107,9 @@ fn who_when(record: &Value) -> String {
 fn location(thread: &Value, annotation: &Value, key: &str) -> String {
     let anchor = &thread["anchor"];
     match anchor["status"].as_str() {
-        Some("anchored") => format!("{} {}", place(anchor, key), quoted(text_of(anchor))),
+        Some("anchored") => format!("{}  {}", place(anchor, key), quoted(text_of(anchor))),
         Some("changed") => format!(
-            "{} {}  changed  was {}",
+            "{}  {}  changed  was {}",
             place(anchor, key),
             quoted(text_of(anchor)),
             quoted(anchor["original"].as_str().unwrap_or(""))
