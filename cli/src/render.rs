@@ -1,16 +1,23 @@
 //! The static HTML page behind `marq-comments render`. Task T-10, design 6.1.
 //!
-//! The page shows the markdown source as plain text with every resolved anchor
-//! marked on it, so a person (or the acceptance report) can see what the
-//! comments system decided. It reads only the `list --json` shape of design
-//! 6.2, and treats every string in it as untrusted: nothing reaches the output
-//! without passing through [`esc`].
+//! The page shows the markdown rendered, with every resolved anchor marked on
+//! the rendered text ([`render_page`]), or as plain source with the same marks
+//! ([`render_source_page`]). Either way a person (or the acceptance report) can
+//! see what the comments system decided. It reads only the `list --json` shape
+//! of design 6.2, and treats every string in it as untrusted: nothing reaches
+//! the output without passing through [`esc`], and the document's own HTML is
+//! never emitted as markup.
 
 use crate::text;
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fmt::Write;
+use std::ops::Range;
 
-/// Renders one markdown file and its threads as a single static HTML page.
+/// Renders one markdown file and its threads as a single static HTML page, with
+/// the markdown rendered (headings, lists, tables, code) and the comments marked
+/// on the rendered text.
 ///
 /// `threads` are the objects `list --json` prints (design 6.2): each has
 /// `annotation`, `state`, `anchor`, `stateChanges` and `replies`.
@@ -19,6 +26,23 @@ use std::fmt::Write;
 /// no usable range (status `orphaned`, or an anchor object that is missing or
 /// malformed) goes to the orphan section, so no thread is dropped.
 pub fn render_page(markdown: &str, threads: &[Value]) -> String {
+    build_page(markdown, threads, Mode::Rendered)
+}
+
+/// The same page with the document shown as source text in a `<pre>`, with a
+/// line-number gutter, so the marks sit on the exact characters the anchors
+/// count.
+pub fn render_source_page(markdown: &str, threads: &[Value]) -> String {
+    build_page(markdown, threads, Mode::Source)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Rendered,
+    Source,
+}
+
+fn build_page(markdown: &str, threads: &[Value], mode: Mode) -> String {
     let chars: Vec<char> = markdown.chars().collect();
     let views: Vec<View> = threads
         .iter()
@@ -46,6 +70,9 @@ pub fn render_page(markdown: &str, threads: &[Value]) -> String {
     out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
     out.push_str("<title>marq-comments</title>\n<style>\n");
     out.push_str(STYLE);
+    if mode == Mode::Rendered {
+        out.push_str(MARKDOWN_STYLE);
+    }
     out.push_str("</style>\n</head>\n<body>\n<header>\n<h1>marq-comments</h1>\n");
     let noun = if views.len() == 1 {
         "thread"
@@ -62,19 +89,31 @@ pub fn render_page(markdown: &str, threads: &[Value]) -> String {
             String::new()
         },
     );
-    out.push_str("</header>\n<main>\n<div class=\"layout\">\n<section class=\"source-pane\" aria-label=\"Source\">\n");
-    out.push_str("<div class=\"source-box\">\n");
-    let gutter: Vec<String> = (1..=text::line_count(markdown))
-        .map(|n| n.to_string())
-        .collect();
-    let _ = writeln!(
-        out,
-        "<pre class=\"gutter\" aria-hidden=\"true\">{}</pre>",
-        gutter.join("\n")
-    );
-    out.push_str("<pre class=\"source\">");
-    write_source(&mut out, &chars, &placed);
-    out.push_str("</pre>\n</div>\n</section>\n");
+    out.push_str("</header>\n<main>\n<div class=\"layout\">\n");
+    let mut shown: HashSet<usize> = HashSet::new();
+    match mode {
+        Mode::Source => {
+            out.push_str("<section class=\"source-pane\" aria-label=\"Source\">\n");
+            out.push_str("<div class=\"source-box\">\n");
+            let gutter: Vec<String> = (1..=text::line_count(markdown))
+                .map(|n| n.to_string())
+                .collect();
+            let _ = writeln!(
+                out,
+                "<pre class=\"gutter\" aria-hidden=\"true\">{}</pre>",
+                gutter.join("\n")
+            );
+            out.push_str("<pre class=\"source\">");
+            write_source(&mut out, &chars, &placed);
+            out.push_str("</pre>\n</div>\n</section>\n");
+        }
+        Mode::Rendered => {
+            out.push_str("<section class=\"doc-pane\" aria-label=\"Document\">\n");
+            out.push_str("<div class=\"doc-box\">\n<article class=\"markdown-body\">\n");
+            shown = write_rendered(&mut out, markdown, &chars, &placed);
+            out.push_str("</article>\n</div>\n</section>\n");
+        }
+    }
 
     out.push_str("<aside class=\"cards\" aria-label=\"Comments\">\n");
     if views.is_empty() {
@@ -83,21 +122,22 @@ pub fn render_page(markdown: &str, threads: &[Value]) -> String {
         out.push_str("<p class=\"none\">No comments on the current text</p>\n");
     }
     for view in &placed {
-        write_card(&mut out, view, markdown);
+        let unseen = mode == Mode::Rendered && !shown.contains(&view.index);
+        write_card(&mut out, view, markdown, unseen);
     }
     out.push_str("</aside>\n</div>\n");
 
     if orphaned > 0 {
         out.push_str("<section class=\"orphans\">\n<h2>Orphaned comments</h2>\n");
         for view in views.iter().filter(|v| v.status == Status::Orphaned) {
-            write_card(&mut out, view, markdown);
+            write_card(&mut out, view, markdown, false);
         }
         out.push_str("</section>\n");
     }
     if applied > 0 {
         out.push_str("<section class=\"orphans\">\n<h2>Applied deletions</h2>\n");
         for view in views.iter().filter(|v| v.status == Status::Applied) {
-            write_card(&mut out, view, markdown);
+            write_card(&mut out, view, markdown, false);
         }
         out.push_str("</section>\n");
     }
@@ -238,19 +278,7 @@ fn write_source(out: &mut String, chars: &[char], placed: &[&View]) {
             .filter(|(s, e, _)| *s <= at && *e >= next && e > s)
             .collect();
         for (_, _, v) in &covering {
-            let _ = write!(
-                out,
-                "<mark class=\"s-{} {}\" data-thread=\"t-{}\" title=\"{}\">",
-                state_class(&v.state),
-                v.anchor_class(),
-                v.index + 1,
-                esc(&format!(
-                    "{} {} ({})",
-                    v.short_id(),
-                    v.state,
-                    v.anchor_class()
-                )),
-            );
+            out.push_str(&mark_open(v));
         }
         let segment: String = chars[at..next].iter().collect();
         out.push_str(&esc(&segment));
@@ -260,7 +288,10 @@ fn write_source(out: &mut String, chars: &[char], placed: &[&View]) {
     }
 }
 
-fn write_card(out: &mut String, view: &View, markdown: &str) {
+/// `unseen` is true for a thread that has a range but no rendered text to mark
+/// (the range covers only syntax the renderer drops), so the card says why the
+/// page shows no highlight for it.
+fn write_card(out: &mut String, view: &View, markdown: &str, unseen: bool) {
     let annotation = &view.thread["annotation"];
     let anchor = &view.thread["anchor"];
     let kind = if view.is_suggestion() {
@@ -299,6 +330,9 @@ fn write_card(out: &mut String, view: &View, markdown: &str) {
                     ""
                 }
             );
+            if unseen {
+                out.push_str(" <span class=\"flag\">no rendered text</span>");
+            }
         }
         None if view.status == Status::Applied => {
             out.push_str(" <span class=\"flag\">applied</span>")
@@ -426,6 +460,475 @@ fn esc(input: &str) -> String {
     out
 }
 
+// ---- the rendered view ----
+
+/// One thread's range on the markdown, in bytes, with the opening tag of its
+/// mark prepared.
+struct Span {
+    start: usize,
+    end: usize,
+    number: usize,
+    index: usize,
+    open: String,
+}
+
+/// Writes the markdown as HTML with each thread's range marked, and returns the
+/// indexes of the threads that got at least one mark.
+///
+/// Anchors count code points in the source, and pulldown-cmark reports each
+/// event's byte range in the source, so the ranges are converted once and then
+/// compared with event ranges directly.
+///
+/// The mapping from source to rendered text is exact where the rendered text is
+/// the source slice: plain text, the lines of a code block, and the content of a
+/// code span. It is approximate where the two differ (a backslash escape, an
+/// entity, a code span whose line breaks became spaces, text in a block quote
+/// whose `>` prefixes were dropped): the whole event is marked when any range
+/// touches it. Syntax the renderer drops (`#`, `---`, link destinations, table
+/// rules) has no text to mark, so a range over only such syntax marks nothing.
+fn write_rendered(
+    out: &mut String,
+    markdown: &str,
+    chars: &[char],
+    placed: &[&View],
+) -> HashSet<usize> {
+    let mut offsets: Vec<usize> = markdown.char_indices().map(|(i, _)| i).collect();
+    offsets.push(markdown.len());
+    debug_assert_eq!(offsets.len(), chars.len() + 1);
+
+    let mut spans: Vec<Span> = placed
+        .iter()
+        .filter_map(|v| {
+            let (s, e) = v.range?;
+            Some(Span {
+                start: offsets[s],
+                end: offsets[e],
+                number: v.index + 1,
+                index: v.index,
+                open: mark_open(v),
+            })
+        })
+        .collect();
+    spans.sort_by_key(|s| (s.start, std::cmp::Reverse(s.end), s.index));
+
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_FOOTNOTES);
+    let events: Vec<(Event, Range<usize>)> = Parser::new_ext(markdown, options)
+        .into_offset_iter()
+        .collect();
+
+    let mut doc = Doc {
+        md: markdown,
+        out,
+        spans,
+        next_ref: 0,
+        marked: HashSet::new(),
+    };
+    doc.run(&events);
+    doc.flush_refs(usize::MAX);
+    doc.marked
+}
+
+struct Doc<'a> {
+    md: &'a str,
+    out: &'a mut String,
+    /// Sorted by start, then longest first, then thread order.
+    spans: Vec<Span>,
+    /// Spans before this index have had their numbered link written.
+    next_ref: usize,
+    marked: HashSet<usize>,
+}
+
+impl Doc<'_> {
+    fn run(&mut self, events: &[(Event, Range<usize>)]) {
+        let slugs = heading_ids(events);
+        let mut heading = 0;
+        let mut links: Vec<&'static str> = Vec::new();
+        let mut aligns: Vec<Alignment> = Vec::new();
+        let mut in_head = false;
+        let mut column = 0;
+
+        for (i, (event, range)) in events.iter().enumerate() {
+            match event {
+                Event::Start(tag) => match tag {
+                    Tag::Paragraph => self.out.push_str("<p>"),
+                    Tag::Heading { level, .. } => {
+                        let id = slugs.get(heading).cloned().unwrap_or_default();
+                        heading += 1;
+                        let _ = write!(self.out, "<h{} id=\"{}\">", *level as usize, esc(&id));
+                    }
+                    Tag::BlockQuote(_) => self.out.push_str("<blockquote>\n"),
+                    Tag::CodeBlock(kind) => {
+                        self.out.push_str("<pre><code");
+                        if let CodeBlockKind::Fenced(info) = kind {
+                            let lang: String = info
+                                .split_whitespace()
+                                .next()
+                                .unwrap_or("")
+                                .chars()
+                                .filter(|c| c.is_ascii_alphanumeric() || "_+-#.".contains(*c))
+                                .collect();
+                            if !lang.is_empty() {
+                                let _ = write!(self.out, " class=\"language-{lang}\"");
+                            }
+                        }
+                        self.out.push('>');
+                    }
+                    // The document's own HTML is shown as text, never as markup.
+                    Tag::HtmlBlock => self.out.push_str("<pre class=\"raw-html\">"),
+                    Tag::List(None) => self.out.push_str("<ul>\n"),
+                    Tag::List(Some(1)) => self.out.push_str("<ol>\n"),
+                    Tag::List(Some(n)) => {
+                        let _ = writeln!(self.out, "<ol start=\"{n}\">");
+                    }
+                    Tag::Item => {
+                        let task = matches!(events.get(i + 1), Some((Event::TaskListMarker(_), _)));
+                        self.out
+                            .push_str(if task { "<li class=\"task\">" } else { "<li>" });
+                    }
+                    Tag::FootnoteDefinition(label) => {
+                        let _ = write!(
+                            self.out,
+                            "<div class=\"footnote\" id=\"md-fn-{}\"><sup>{}</sup> ",
+                            esc(&slug(label)),
+                            esc(label)
+                        );
+                    }
+                    Tag::Table(a) => {
+                        aligns = a.clone();
+                        self.out.push_str("<div class=\"table-wrap\"><table>\n");
+                    }
+                    Tag::TableHead => {
+                        in_head = true;
+                        column = 0;
+                        self.out.push_str("<thead><tr>");
+                    }
+                    Tag::TableRow => {
+                        column = 0;
+                        self.out.push_str("<tr>");
+                    }
+                    Tag::TableCell => {
+                        let class = match aligns.get(column) {
+                            Some(Alignment::Left) => " class=\"a-left\"",
+                            Some(Alignment::Center) => " class=\"a-center\"",
+                            Some(Alignment::Right) => " class=\"a-right\"",
+                            _ => "",
+                        };
+                        column += 1;
+                        let _ = write!(self.out, "<{}{class}>", if in_head { "th" } else { "td" });
+                    }
+                    Tag::Emphasis => self.out.push_str("<em>"),
+                    Tag::Strong => self.out.push_str("<strong>"),
+                    // `<s>`, not `<del>`: the page already styles `del` as a
+                    // rejected deletion in a suggestion card.
+                    Tag::Strikethrough => self.out.push_str("<s>"),
+                    Tag::Link {
+                        link_type,
+                        dest_url,
+                        title,
+                        ..
+                    } => links.push(self.open_link(*link_type, dest_url, title)),
+                    Tag::Image {
+                        dest_url, title, ..
+                    } => {
+                        // Never an `<img>`: the page must load nothing. The box
+                        // shows the alt text; the source is in the tooltip.
+                        let mut tip = format!("image: {dest_url}");
+                        if !title.is_empty() {
+                            let _ = write!(tip, " ({title})");
+                        }
+                        let _ = write!(self.out, "<span class=\"img\" title=\"{}\">", esc(&tip));
+                    }
+                    _ => {}
+                },
+                Event::End(tag) => match tag {
+                    TagEnd::Paragraph => self.out.push_str("</p>\n"),
+                    TagEnd::Heading(level) => {
+                        let _ = writeln!(self.out, "</h{}>", *level as usize);
+                    }
+                    TagEnd::BlockQuote(_) => self.out.push_str("</blockquote>\n"),
+                    TagEnd::CodeBlock => self.out.push_str("</code></pre>\n"),
+                    TagEnd::HtmlBlock => self.out.push_str("</pre>\n"),
+                    TagEnd::List(true) => self.out.push_str("</ol>\n"),
+                    TagEnd::List(false) => self.out.push_str("</ul>\n"),
+                    TagEnd::Item => self.out.push_str("</li>\n"),
+                    TagEnd::FootnoteDefinition => self.out.push_str("</div>\n"),
+                    TagEnd::Table => self.out.push_str("</tbody></table></div>\n"),
+                    TagEnd::TableHead => {
+                        in_head = false;
+                        self.out.push_str("</tr></thead>\n<tbody>\n");
+                    }
+                    TagEnd::TableRow => self.out.push_str("</tr>\n"),
+                    TagEnd::TableCell => {
+                        self.out.push_str(if in_head { "</th>" } else { "</td>" });
+                    }
+                    TagEnd::Emphasis => self.out.push_str("</em>"),
+                    TagEnd::Strong => self.out.push_str("</strong>"),
+                    TagEnd::Strikethrough => self.out.push_str("</s>"),
+                    TagEnd::Link => self.out.push_str(links.pop().unwrap_or("</span>")),
+                    TagEnd::Image => self.out.push_str("</span>"),
+                    _ => {}
+                },
+                Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
+                    self.text(text, range);
+                }
+                Event::Code(code) => self.code(code, range),
+                Event::SoftBreak => self.text("\n", range),
+                Event::HardBreak => self.atom("<br>\n", range),
+                Event::Rule => self.atom("<hr>\n", range),
+                Event::TaskListMarker(done) => self.atom(
+                    if *done {
+                        "<input type=\"checkbox\" disabled checked> "
+                    } else {
+                        "<input type=\"checkbox\" disabled> "
+                    },
+                    range,
+                ),
+                Event::FootnoteReference(label) => {
+                    let html = format!(
+                        "<sup class=\"fnref\"><a href=\"#md-fn-{}\">{}</a></sup>",
+                        esc(&slug(label)),
+                        esc(label)
+                    );
+                    self.atom(&html, range);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Opens a link. Only `http:`, `https:`, `mailto:` and `#fragment`
+    /// destinations become an `href`; anything else (`javascript:`, `data:`, a
+    /// relative path) is shown as text with the destination in a tooltip, since
+    /// the page is a static file and a relative path would point nowhere.
+    /// Returns the closing tag.
+    fn open_link(&mut self, kind: LinkType, dest: &str, title: &str) -> &'static str {
+        let dest = if kind == LinkType::Email && !dest.to_ascii_lowercase().starts_with("mailto:") {
+            format!("mailto:{dest}")
+        } else {
+            dest.to_string()
+        };
+        let lower = dest.to_ascii_lowercase();
+        let tip = if title.is_empty() {
+            String::new()
+        } else {
+            format!(" title=\"{}\"", esc(title))
+        };
+        if let Some(fragment) = dest.strip_prefix('#') {
+            // Heading ids carry a prefix so they cannot meet the `t-N` ids of
+            // the cards; a fragment link gets the same prefix.
+            let target = if fragment.is_empty() {
+                "#".to_string()
+            } else {
+                format!("#md-{fragment}")
+            };
+            let _ = write!(self.out, "<a href=\"{}\"{tip}>", esc(&target));
+            "</a>"
+        } else if ["http://", "https://", "mailto:"]
+            .iter()
+            .any(|p| lower.starts_with(p))
+        {
+            let _ = write!(
+                self.out,
+                "<a href=\"{}\" rel=\"noopener noreferrer\"{tip}>",
+                esc(&dest)
+            );
+            "</a>"
+        } else {
+            let _ = write!(
+                self.out,
+                "<span class=\"nolink\" title=\"{}\">",
+                esc(&format!("link: {dest}"))
+            );
+            "</span>"
+        }
+    }
+
+    /// Writes the numbered link of every thread that starts at or before `upto`
+    /// and has none yet. The link sits before the marks of the text it starts
+    /// in, outside them, so the text inside a mark is only document text. A
+    /// thread that starts in syntax with no rendered text gets its number at
+    /// the next rendered position.
+    fn flush_refs(&mut self, upto: usize) {
+        while let Some(span) = self.spans.get(self.next_ref) {
+            if span.start > upto {
+                break;
+            }
+            let _ = write!(
+                self.out,
+                "<a class=\"ref\" href=\"#t-{0}\">{0}</a>",
+                span.number
+            );
+            self.next_ref += 1;
+        }
+    }
+
+    /// A piece of rendered text with no source text of its own to mark.
+    fn atom(&mut self, html: &str, range: &Range<usize>) {
+        self.flush_refs(range.end.saturating_sub(1).max(range.start));
+        self.out.push_str(html);
+    }
+
+    fn text(&mut self, text: &str, range: &Range<usize>) {
+        if self.md.get(range.clone()) == Some(text) {
+            self.exact(text, range.start);
+        } else {
+            self.whole(text, range);
+        }
+    }
+
+    /// Inline code. The rendered text is the source without its backtick
+    /// fences, and without one space at each end when both ends have one.
+    fn code(&mut self, code: &str, range: &Range<usize>) {
+        let slice = self.md.get(range.clone()).unwrap_or("");
+        let fence = slice.bytes().take_while(|b| *b == b'`').count();
+        let inner = slice.get(fence..slice.len().saturating_sub(fence));
+        let base = match inner {
+            Some(i) if i == code => Some(range.start + fence),
+            Some(i)
+                if i.len() >= 2
+                    && i.strip_prefix(' ').and_then(|r| r.strip_suffix(' ')) == Some(code) =>
+            {
+                Some(range.start + fence + 1)
+            }
+            _ => None,
+        };
+        self.flush_refs(base.unwrap_or(range.start));
+        self.out.push_str("<code>");
+        match base {
+            Some(base) => self.exact(code, base),
+            None => self.whole(code, range),
+        }
+        self.out.push_str("</code>");
+    }
+
+    /// `text` is the source at `base..base + text.len()`. The text is cut at
+    /// every range boundary inside it, and each piece is wrapped in one `<mark>`
+    /// per covering range, outermost (earliest start, then longest) first, so
+    /// overlapping ranges nest and adjacent ones sit side by side.
+    fn exact(&mut self, text: &str, base: usize) {
+        let end = base + text.len();
+        let mut cuts = vec![base, end];
+        for s in &self.spans {
+            for p in [s.start, s.end] {
+                if p > base && p < end && text.is_char_boundary(p - base) {
+                    cuts.push(p);
+                }
+            }
+        }
+        cuts.sort_unstable();
+        cuts.dedup();
+        for pair in cuts.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            self.flush_refs(a);
+            let covering: Vec<usize> = (0..self.spans.len())
+                .filter(|&i| {
+                    let s = &self.spans[i];
+                    s.start <= a && s.end >= b && s.end > s.start
+                })
+                .collect();
+            self.marked_run(&text[a - base..b - base], &covering);
+        }
+    }
+
+    /// The approximation: rendered text that is not the source slice cannot be
+    /// split at a source boundary, so the whole event is marked for every range
+    /// that overlaps it.
+    fn whole(&mut self, text: &str, range: &Range<usize>) {
+        self.flush_refs(range.end.saturating_sub(1).max(range.start));
+        let covering: Vec<usize> = (0..self.spans.len())
+            .filter(|&i| {
+                let s = &self.spans[i];
+                s.start < range.end && s.end > range.start && s.end > s.start
+            })
+            .collect();
+        self.marked_run(text, &covering);
+    }
+
+    fn marked_run(&mut self, text: &str, covering: &[usize]) {
+        for &i in covering {
+            self.out.push_str(&self.spans[i].open);
+            self.marked.insert(self.spans[i].index);
+        }
+        self.out.push_str(&esc(text));
+        for _ in covering {
+            self.out.push_str("</mark>");
+        }
+    }
+}
+
+/// The id of each heading, in document order, GitHub style: lower case, spaces
+/// to hyphens, punctuation dropped, a numeric suffix on a repeat. The `md-`
+/// prefix keeps every id apart from the cards' `t-N` ids and from each other
+/// page id.
+fn heading_ids(events: &[(Event, Range<usize>)]) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut used: HashSet<String> = HashSet::new();
+    let mut i = 0;
+    while i < events.len() {
+        if let Event::Start(Tag::Heading { .. }) = &events[i].0 {
+            let mut text = String::new();
+            let mut image = 0;
+            i += 1;
+            while i < events.len() {
+                match &events[i].0 {
+                    Event::End(TagEnd::Heading(_)) => break,
+                    Event::Start(Tag::Image { .. }) => image += 1,
+                    Event::End(TagEnd::Image) => image -= 1,
+                    Event::Text(t) | Event::Code(t) if image == 0 => text.push_str(t),
+                    _ => {}
+                }
+                i += 1;
+            }
+            let mut base = slug(&text);
+            if base.is_empty() {
+                base = "section".to_string();
+            }
+            let mut id = base.clone();
+            let mut n = 0;
+            while !used.insert(id.clone()) {
+                n += 1;
+                id = format!("{base}-{n}");
+            }
+            ids.push(format!("md-{id}"));
+        }
+        i += 1;
+    }
+    ids
+}
+
+fn slug(text: &str) -> String {
+    text.trim()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' | '-' => Some('-'),
+            '_' => Some('_'),
+            c if c.is_alphanumeric() => Some(c),
+            _ => None,
+        })
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// The opening `<mark>` tag of a thread.
+fn mark_open(v: &View) -> String {
+    format!(
+        "<mark class=\"s-{} {}\" data-thread=\"t-{}\" title=\"{}\">",
+        state_class(&v.state),
+        v.anchor_class(),
+        v.index + 1,
+        esc(&format!(
+            "{} {} ({})",
+            v.short_id(),
+            v.state,
+            v.anchor_class()
+        )),
+    )
+}
+
 const STYLE: &str = r#":root {
   color-scheme: light dark;
   --bg: #fbfbfa; --fg: #1f2328; --muted: #5d6670; --line: #d4d8dc;
@@ -451,8 +954,8 @@ const STYLE: &str = r#":root {
 body { margin: 0; background: var(--bg); color: var(--fg);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 header, main { max-width: 90rem; margin: 0 auto; padding: 0 16px; }
-h1 { font-size: 1.1rem; margin: 16px 0 4px; }
-h2 { font-size: 1.05rem; margin: 24px 0 8px; }
+header h1 { font-size: 1.1rem; margin: 16px 0 4px; }
+.orphans h2 { font-size: 1.05rem; margin: 24px 0 8px; }
 .summary { margin: 0 0 16px; color: var(--muted); }
 .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
 @media (max-width: 60rem) { .layout { grid-template-columns: minmax(0, 1fr); } }
@@ -499,4 +1002,69 @@ ins { background: var(--accepted); text-decoration: none; }
 .reply { margin-top: 6px; }
 .none { color: var(--muted); }
 .orphans .card { margin-bottom: 12px; max-width: 60rem; }
+"#;
+
+/// Added after [`STYLE`] on the rendered page: GitHub-like markdown, with its
+/// own colour variables and a dark variant.
+const MARKDOWN_STYLE: &str = r#":root {
+  --md-code: rgba(130, 140, 150, 0.22); --md-block: #f3f5f7; --md-zebra: #f6f8fa;
+  --md-rule: #d1d9e0; --md-quote: #59636e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --md-code: rgba(150, 160, 170, 0.25); --md-block: #1f2429; --md-zebra: #1d2227;
+    --md-rule: #3d444d; --md-quote: #9aa4ae;
+  }
+}
+.doc-box { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  padding: 8px 32px 24px; }
+.markdown-body { max-width: 52rem; margin: 0 auto; font: 16px/1.6 -apple-system, BlinkMacSystemFont,
+  "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; overflow-wrap: break-word; }
+.markdown-body > :first-child { margin-top: 16px; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4,
+.markdown-body h5, .markdown-body h6 { margin: 24px 0 16px; font-weight: 600; line-height: 1.25; }
+.markdown-body h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid var(--md-rule); }
+.markdown-body h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid var(--md-rule); }
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body h5 { font-size: .875em; }
+.markdown-body h6 { font-size: .85em; color: var(--muted); }
+.markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body blockquote,
+.markdown-body pre, .markdown-body .table-wrap { margin: 0 0 16px; }
+.markdown-body ul, .markdown-body ol { padding-left: 2em; }
+.markdown-body li > ul, .markdown-body li > ol { margin: 0; }
+.markdown-body li + li { margin-top: .25em; }
+.markdown-body li > p { margin: 16px 0 0; }
+.markdown-body li.task { list-style: none; }
+.markdown-body li.task input { margin: 0 .4em .25em -1.4em; vertical-align: middle; }
+.markdown-body a:not(.ref) { color: var(--link); text-decoration: none; }
+.markdown-body a:not(.ref):hover { text-decoration: underline; }
+.markdown-body .nolink { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.markdown-body blockquote { padding: 0 1em; color: var(--md-quote); border-left: .25em solid var(--md-rule); }
+.markdown-body blockquote > :last-child { margin-bottom: 0; }
+.markdown-body hr { height: .25em; padding: 0; margin: 24px 0; background: var(--md-rule); border: 0; }
+.markdown-body code { font: 85% ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: .2em .4em; background: var(--md-code); border-radius: 6px; }
+.markdown-body pre { padding: 16px; overflow: auto; background: var(--md-block); border-radius: 6px;
+  font: 85%/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; tab-size: 4; }
+.markdown-body pre code { padding: 0; background: none; font: inherit; border-radius: 0; }
+.markdown-body pre.raw-html { color: var(--md-quote); }
+.markdown-body .table-wrap { overflow-x: auto; }
+.markdown-body table { border-collapse: collapse; width: 100%; }
+.markdown-body th, .markdown-body td { padding: 6px 13px; border: 1px solid var(--md-rule); vertical-align: top; text-align: left; }
+.markdown-body th { font-weight: 600; background: var(--md-block); }
+.markdown-body tbody tr:nth-child(even) { background: var(--md-zebra); }
+.markdown-body .a-center { text-align: center; }
+.markdown-body .a-right { text-align: right; }
+.markdown-body .img { display: inline-block; padding: 0 .5em; border: 1px dashed var(--md-rule);
+  border-radius: 6px; background: var(--md-code); color: var(--muted); font-size: .9em; }
+.markdown-body .img::before { content: "\1F5BC\FE0E\A0"; }
+.markdown-body .footnote { font-size: .875em; color: var(--md-quote); margin: 0 0 8px; }
+.markdown-body :target { background: var(--open); }
+@media (max-width: 40rem) {
+  .doc-box { padding: 4px 14px 16px; }
+  .markdown-body { font-size: 15px; }
+  .markdown-body h1 { font-size: 1.7em; }
+  .markdown-body th, .markdown-body td { padding: 4px 8px; }
+}
 "#;

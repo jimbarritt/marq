@@ -112,6 +112,9 @@ pub enum Command {
         /// Write the page here. Without it the page goes to standard output.
         #[arg(short, long, value_name = "OUT.html")]
         output: Option<PathBuf>,
+        /// Show the markdown source in a `<pre>` instead of the rendered document.
+        #[arg(long)]
+        source: bool,
     },
 }
 

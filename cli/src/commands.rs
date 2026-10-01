@@ -98,7 +98,11 @@ pub fn run(cli: Cli) -> Outcome {
         Command::Reject { id } => decide(&store()?, &who, &id, Action::Reject)?,
         Command::Accept { id } => decide(&store()?, &who, &id, Action::Accept)?,
         Command::Sync { remote } => sync(&store()?, &who, &remote)?,
-        Command::Render { file, output } => render_file(&store()?, &file, output.as_deref())?,
+        Command::Render {
+            file,
+            output,
+            source,
+        } => render_file(&store()?, &file, output.as_deref(), source)?,
     }
     Ok(())
 }
@@ -606,11 +610,15 @@ fn sync_lines(report: &SyncReport, remote: &str) -> String {
     lines.iter().map(|l| format!("{l}\n")).collect()
 }
 
-fn render_file(store: &Store, file: &str, output: Option<&Path>) -> Outcome {
+fn render_file(store: &Store, file: &str, output: Option<&Path>, source: bool) -> Outcome {
     let key = store.document_key(file)?;
     let (markdown, _) = read_text(store, &key)?;
     let threads = threads::build(store, &key, &markdown)?;
-    let page = render::render_page(&markdown, &threads);
+    let page = if source {
+        render::render_source_page(&markdown, &threads)
+    } else {
+        render::render_page(&markdown, &threads)
+    };
     match output {
         Some(path) => {
             let path: PathBuf = path.to_path_buf();
