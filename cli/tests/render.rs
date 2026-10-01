@@ -1194,3 +1194,23 @@ fn writes_a_rendered_sample_page() {
     assert!(html.contains("<table>"));
     write_sample("render-sample.html", &html);
 }
+
+// ---- a bare line break tag is the one inline HTML that is emitted as markup ----
+
+#[test]
+fn a_line_break_tag_in_a_table_cell_is_a_line_break() {
+    let md = "| a | b |\n|---|---|\n| one<br>two<BR/>three | x |\n";
+    let page = render_page(md, &[]);
+    assert_eq!(page.matches("<br>").count(), 2, "{page}");
+    assert!(!page.contains("&lt;br&gt;"), "{page}");
+}
+
+#[test]
+fn other_inline_html_stays_escaped_even_next_to_a_line_break() {
+    let md = "x<br>y <b onclick=alert(1)>z</b> <br class=a> <br\n/>w";
+    let page = render_page(md, &[]);
+    assert_eq!(page.matches("<br>").count(), 1, "{page}");
+    assert!(page.contains("&lt;b onclick=alert(1)&gt;"), "{page}");
+    assert!(page.contains("&lt;br class=a&gt;"), "{page}");
+    assert!(!page.contains("<b "), "{page}");
+}

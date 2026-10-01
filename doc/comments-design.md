@@ -376,7 +376,7 @@ the state is `open`.
 | `resolve ID`, `reopen ID` | State changes for a comment; `reopen` also reopens a rejected suggestion. |
 | `accept ID`, `reject ID` | State changes for a suggestion; `accept` also edits the file. |
 | `sync [--remote NAME]` | Fetch, merge and push `md-comments` (section 2.4). |
-| `render FILE [-o OUT.html]` | A plain HTML page: the markdown source in a `<pre>`, anchored and changed ranges in `<mark>`, threads beside them, orphans listed. |
+| `render FILE [-o OUT.html] [--source]` | A static HTML page: the markdown rendered as a document, anchored and changed ranges in `<mark>` on the rendered text, a card for each thread beside it, orphans and applied deletions listed after it. `--source` shows the markdown source in a `<pre>` with a line gutter instead. |
 
 Global flags: `--author "Name <email>"`, `--agent`, `-C DIR` (run as if in DIR,
 as `git -C` does).
@@ -385,6 +385,12 @@ as `git -C` does).
 |---|---|
 | Anchors given as a line plus a word | An agent and a person both think in "the word X on line N", and the line removes most ambiguity before the CLI computes offsets. |
 | `--range` as well | The marq UI later holds exact positions and must not have to reconstruct a word and a line. |
+| `render` shows the document rendered, with the source view behind `--source` | Jim's decision (2026-10-01): a person checks comments against the formatted document, not against markup. The source view stays because it shows exact character ranges. |
+| Anchors are mapped onto the rendered text through `pulldown-cmark`'s byte ranges for each event, and each thread's code-point range is converted to bytes once | One renderer reports which source characters each piece of output came from, so no second mapping is invented. |
+| Where rendered text differs from its source (entities such as `&amp;`, inline code whose line breaks became spaces, text inside a container whose prefix the parser strips), the whole piece is marked | The exact characters cannot be recovered; marking the piece is the honest approximation. Backslash escapes are exact: the parser emits the escaped character as its own event. |
+| A thread whose range covers only syntax that renders as nothing (`#`, `---`, a link destination, a table separator row, list markers, code fences) gets a card flagged "no rendered text" and its number at the next rendered position | The comment must still be seen, and a mark on nothing cannot be drawn. |
+| The document's own HTML is shown as escaped text, except a bare `<br>`, `<br/>` or `<br />`, which is written as a fixed line break | Untrusted input must never become markup. Tables use `<br>` for paragraph breaks in a cell, and a fixed string cannot carry an attribute. |
+| Only `http:`, `https:` and `mailto:` links and `#` fragments get an `href`; images show their alt text in a box and load nothing | The page is a self-contained static file and must stay safe to open. Heading ids are prefixed `md-` so they cannot meet a card id. |
 | A `render` command | A cloud session cannot run marq, and a static page shows the resolved anchors on the real text for a person or a test to check. |
 | `suggest --line N` requires `--text`; `--replace ""` means a deletion; an empty or blank `-m` on `comment` or `reply` is an error | A suggestion needs text to quote, and a deletion is the one case where the replacement is empty. |
 | `render` without `-o` prints the page to standard output; `-C DIR` changes directory first, so a relative `-o` resolves against DIR | The same behaviour as `git -C`. |
@@ -493,6 +499,7 @@ binary, which is how the harness itself is tested.
 | The script lives at `cli/ops/local/` | Jim's layout for scripts run on a local machine. |
 | The example is `example-docs/test.md`, moved from `macos/examples/` to the repo root | The app and the CLI both use it, so it belongs to neither directory. |
 | Scenarios run on a copy in a temporary repository | The acceptance run never changes `example-docs/` or this repository's `md-comments` branch. |
+| `render` is covered by tests for marks in each markdown construct, escaping, unsafe links, and whether every `#` link in `example-docs/test.md` resolves | The rendered view is where the mapping can go wrong, and a mark on the wrong word is the failure a person would not notice. |
 | Output under `cli/target/`, ignored by `cli/.gitignore` | Nothing generated reaches a commit. |
 | The first failed check stops a scenario | Later steps use ids and state from the earlier ones, so continuing would report noise. |
 | The scenarios find their lines and words in `test.md` by text | Editing the example document does not break them, unless a word they use disappears; a setup check says so. |
@@ -515,3 +522,5 @@ binary, which is how the harness itself is tested.
 - **`git gc --prune=now` during a write** could remove a blob before its commit lands.
 - **Writes in one repository are serialised**, at about 31 ms each in a debug build.
 - **A deleted line next to a different added line** reads as a rewrite of the line, because the line diff pairs them, so the anchor is `changed` on the new line, not `orphaned`.
+- **Marks on rendered text are approximate** where the rendered text differs from the source, as in section 6.1: entities, inline code with line breaks, and text in containers whose prefix the parser strips. A range that covers only syntax with no rendered text has a card and no mark.
+- **Wide tables** in the rendered view share their column with nothing but the cards, so a table with long cells is narrow and tall. It scrolls sideways inside its own box.

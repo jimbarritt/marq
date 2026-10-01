@@ -672,6 +672,10 @@ impl Doc<'_> {
                     TagEnd::Image => self.out.push_str("</span>"),
                     _ => {}
                 },
+                // A bare line break is the one piece of inline HTML that is safe to
+                // emit, and tables use it for paragraph breaks inside a cell. The
+                // fixed string is written, never the document's own text.
+                Event::InlineHtml(text) if is_line_break_tag(text) => self.atom("<br>", range),
                 Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
                     self.text(text, range);
                 }
@@ -898,6 +902,14 @@ fn heading_ids(events: &[(Event, Range<usize>)]) -> Vec<String> {
         i += 1;
     }
     ids
+}
+
+/// Whether `html` is exactly `<br>`, `<br/>` or `<br />`, in any letter case.
+fn is_line_break_tag(html: &str) -> bool {
+    matches!(
+        html.trim().to_ascii_lowercase().as_str(),
+        "<br>" | "<br/>" | "<br />"
+    )
 }
 
 fn slug(text: &str) -> String {
