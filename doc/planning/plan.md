@@ -5,6 +5,7 @@
 - **Next:** Mission [M-COMMENTS](M-COMMENTS-git-backed-comments.md) — git-backed comments and suggestions for markdown
 - **Sub-doc:** [M-COMMENTS-git-backed-comments.md](M-COMMENTS-git-backed-comments.md) — the mission owns its own task breakdown (T-00 onward)
 - **Blockers:** None. Jim to confirm `cd macos && just check` still passes after T-13 moved `macos/examples/` to `example-docs/`. The acceptance run exists (T-14): `cd cli && just acceptance`, 0 of 10 scenarios pass. T-03, T-04 and T-05 start next, and each one's measure is the acceptance count. Design: [doc/comments-design.md](../comments-design.md).
+- **Model:** build T-03, T-04, T-06, T-08 and T-10 on Sonnet 5.5. T-05 (anchoring) and T-07 (parallel writes and `sync`) need Opus 5.5, because a subtle error there can pass the acceptance run and still be wrong. A session cannot change its own model, so use one of two routes. **Route 1 (default):** the session hands T-05 or T-07 to a subagent started with the Agent tool's `model: "opus"`, with a prompt that points at `doc/comments-design.md`, the task row, and `cd cli && just acceptance`, and asks for the unit tests the design lists. **Route 2:** if no subagent can run, stop and tell Jim: "switch to Opus before T-05" (`/model claude-opus-5-5`), and switch back after T-07.
 - **Context:** See [Delta: Git-backed Comments](#delta-git-backed-comments-mission-m-comments) below
 - **Before verifying any layout change:** `just problems`, then `just check`. See the `/verify` skill.
 

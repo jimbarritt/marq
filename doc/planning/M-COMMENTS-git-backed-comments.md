@@ -175,6 +175,8 @@ for what each contributes past the brief's own summary: none of the four
 models resolved-comment history, so that part of T-02 is original design, not
 adaptation.
 
+**Model note**: T-05 and T-07 are the tasks that need Opus 5.5; the rest can run on Sonnet 5.5. The routes are in `plan.md` under What's Next. Reason: both hold edge cases the acceptance run does not reach (code-point offsets, identical sentences, a lost `update-ref` race, a rejected push), so passing scenarios is not proof there.
+
 **T-14 note**: the acceptance run is test-first. `cd cli && just acceptance` runs ten
 scenarios and writes `cli/target/acceptance/index.html`. With no crate yet, all ten fail with
 the reason, which is the correct state. The harness was checked against a throwaway stub for the
