@@ -147,7 +147,8 @@ the contents, whatever the number of annotations.
 | Decision | Reason |
 |---|---|
 | `source` is the repo-relative path, a relative IRI reference | The repository has no single URL (clones, forks, a laptop), and a relative reference resolves against wherever the repository is. |
-| `marq:sourceBlob` is the git blob id of the working-tree file at the time of writing, from `git hash-object -w` | It records the exact text the selectors describe, with or without a commit, and section 4.2 uses it to map positions forward. |
+| `marq:sourceBlob` is the git blob id of the working-tree file at the time of writing; the file is read once, the selectors are computed from those bytes, and that same buffer is stored as the blob | A second read would let an edit between the two reads put the blob and the selectors out of step. |
+| (Superseded wording) the blob id comes from `git hash-object -w` | The blob is the same unfiltered one. | It records the exact text the selectors describe, with or without a commit, and section 4.2 uses it to map positions forward. |
 | Both a `TextQuoteSelector` and a `TextPositionSelector`, exactly one of each in the array | The quote survives edits and the position gives the search a starting point (T-01, Hypothesis's order). |
 | `prefix` and `suffix` are always present, and are empty strings at the start or end of the file | A reader never has to ask whether a key may be missing. |
 | The positions are code points, as in section 4.1 | Stated here too, because the storage layer stores them as given. |
@@ -323,10 +324,12 @@ the state is `open`.
 |---|---|
 | State is a fold over state-change files | Resolving and accepting never delete, as the brief requires, and parallel state changes merge. |
 | Order by `created`, then `id` | Every clone computes the same state from the same files. |
+| A new state change takes `created` one second past the latest existing change for that annotation when the clock is not already later; a reply likewise against its target and that target's replies | Found by T-06: `created` has whole-second resolution and ties break on a random id, so `reject` then `reopen` inside one second folded to `rejected` about half the time. A burst of commands can run a few seconds ahead of the clock. |
 | `accepted` is final | An accepted edit already changed the markdown, and reopening cannot undo that. |
 | `rejected` can reopen | Jim's decision (2026-09-29): rejecting changes no text, so reopening loses nothing. |
 | A suggestion with both an `accepted` and a `rejected` change after a sync is reported with a warning, and the fold result stands | This happens only when two clones decide in parallel; the working-tree text shows what happened, and a person settles it. |
 | `accept` re-anchors first and refuses a suggestion that is not `anchored` | Applying an edit at a stale position, or over text that changed since the suggestion, corrupts the markdown. |
+| If the edited file is written but recording the `accepted` change fails, the error says the edit is in the file and the suggestion is still open | The two steps cannot be one atomic action, so the message states the half-done state. |
 | `accept` writes the working-tree file and never commits it | The working branch belongs to the user; the CLI commits only to `md-comments`. |
 
 ## 6. CLI
@@ -354,6 +357,8 @@ as `git -C` does).
 | Anchors given as a line plus a word | An agent and a person both think in "the word X on line N", and the line removes most ambiguity before the CLI computes offsets. |
 | `--range` as well | The marq UI later holds exact positions and must not have to reconstruct a word and a line. |
 | A `render` command | A cloud session cannot run marq, and a static page shows the resolved anchors on the real text for a person or a test to check. |
+| `suggest --line N` requires `--text`; `--replace ""` means a deletion; an empty or blank `-m` on `comment` or `reply` is an error | A suggestion needs text to quote, and a deletion is the one case where the replacement is empty. |
+| `render` without `-o` prints the page to standard output; `-C DIR` changes directory first, so a relative `-o` resolves against DIR | The same behaviour as `git -C`. |
 | No command to edit or delete a comment body | Not in the brief; an edit is a reply, and deletion contradicts "nothing gets deleted". |
 
 ### 6.2 Output
@@ -368,8 +373,7 @@ Text by default, one thread per block:
     Obsidian plugins ship one CJS file.
 ```
 
-An orphan prints `orphaned` in place of `file:line:column`, with the stored quote.
-A changed anchor prints `changed` after the location, then `was "<original quote>"`.
+An anchored thread prints `file:line:column` and the anchored text in quotes. A changed one prints the new text, then `changed`, then `was "<original quote>"`. An orphan prints `orphaned` in place of the location, then the stored quote. A suggestion adds a line `replace with "NEW"` before its reason. `show` appends a `state changes:` list. Quotes are not escaped.
 
 `comment`, `reply` and `suggest` print the new annotation's 8-character id on one
 line and nothing else, so a script can capture it. The other commands print
@@ -383,12 +387,15 @@ nothing on success.
 | `state` | `open`, `resolved`, `accepted` or `rejected` |
 | `anchor` | `{"status": "anchored", "start", "end", "line", "column", "text"}`; or `{"status": "changed", ..., "text", "original"}`; or `{"status": "orphaned"}`. `text` is the text of the range |
 | `stateChanges` | The stored state-change records, unchanged, in fold order |
-| `replies` | Thread objects in this same shape, in `created` order |
+| `replies` | Thread objects in this same shape, in `created` order. A reply object carries its root's `state` and a copy of its root's `anchor`, and its `stateChanges` is `[]` |
 
 | Decision | Reason |
 |---|---|
 | JSON output embeds the stored annotation unchanged, with computed fields beside it | A consumer gets the W3C record as stored, and the computed fields never mix into it. |
 | Lines and columns are 1-based in output | Editors and `file:line:col` links count from 1. |
+| `show` on a reply id shows the subtree rooted at that reply, with the root's state | The reply is the unit the person named. |
+| Warnings, such as a thread decided both `accepted` and `rejected`, go to standard error in text mode only | Standard output stays parseable. |
+| `sync` prints one line: `nothing to sync`, `updated the comments branch from <remote>`, `merged the comments from <remote> with the local ones`, `pushed the comments branch to <remote>`, or `the comments branch is up to date with <remote>` | A person sees what happened. |
 | The three creating commands print only the id | A script or an agent takes the output as the id, with no parsing. |
 | `list --json` is one array, not one object per line | One `json.loads` reads it, and an empty file gives `[]`. |
 
@@ -405,7 +412,7 @@ random uuids make 6 characters unique in practice.
 | 2 | An `ID` matched no annotation, or more than one |
 | 3 | `accept` refused a suggestion whose anchor is `changed` or `orphaned` |
 
-Reason: scripts and agents branch on the cause without parsing messages.
+A usage error from the argument parser, and an id argument that is too short or not hexadecimal, also exit 1: the parser's own default of 2 is remapped, because 2 is reserved for a lookup that matched none or several. Reason: scripts and agents branch on the cause without parsing messages.
 
 ## 7. Testing
 
@@ -470,3 +477,4 @@ binary, which is how the harness itself is tested.
 - **A substring match counts.** After an edit, `reloading` anchors inside `reloadingg`, because the mapped position is exempt from the floor and the design asks for exact text, not word boundaries. A UI may want to show it.
 - **A long quote with little surviving context** orphans even when it is unique in the file, because the floor counts context only.
 - **Both sides of the context lost** while the quote stays intact and its column shifts gives a `changed` range that contains the intact quote.
+- **Two clones deciding in the same second** order their state changes by random id. Every clone computes the same result from the same files, but which decision wins is arbitrary. A fraction in `created` would remove the tie.

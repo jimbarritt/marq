@@ -136,11 +136,11 @@ Jim decides:
 | T-03 | Write the JSON Schema | Schemas for an annotation and a state change in `cli/schema/`; fixtures in `cli/tests/fixtures/` validate (design 3, 7) | none | T-02 | DONE |
 | T-04 | Build the storage layer | Crate scaffold in `cli/`; write, read and `sync` on `md-comments` through a temporary index, never touching the working tree (design 2) | none | T-02 | DONE |
 | T-05 | Build anchoring | Selector creation, the resolve steps including `changed` (design 4.2), the context floor; one test per row of design 4.4 | none | T-02 | DONE |
-| T-06 | Build the CLI commands | `comment`, `reply`, `suggest`, `list`, `show`, `resolve`, `reopen`, `accept`, `reject`, with text and JSON output and the exit codes (design 5, 6) | none | T-03, T-04, T-05 | TODO |
+| T-06 | Build the CLI commands | `comment`, `reply`, `suggest`, `list`, `show`, `resolve`, `reopen`, `accept`, `reject`, with text and JSON output and the exit codes (design 5, 6) | none | T-03, T-04, T-05 | DONE |
 | T-07 | Prove parallel writes | Two clones against a bare remote, both `sync`, no lost annotation, including parallel state changes on one annotation | none | T-06 | TODO |
 | T-08 | Document agent use | A section an agent reads to use the CLI, ready to paste into `CLAUDE.md` | none | T-06 | TODO |
 | T-09 | Update `doc/planning/plan.md` | A delta for this mission with its tasks and status | none | T-02 | DONE |
-| T-10 | Build `render` | The static HTML page of design 6.1, checked by a test on a fixture | none | T-05, T-06 | TODO |
+| T-10 | Build `render` | The static HTML page of design 6.1, checked by a test on a fixture | none | T-05, T-06 | DONE |
 | T-13 | Move `macos/examples/` to `example-docs/` | The example docs at the repo root for the app and the CLI; `macos/justfile` and `check-metrics.py` updated | none | T-02 | DONE, awaiting Jim's `cd macos && just check` |
 | T-14 | Build the acceptance run | `cli/justfile` and `cli/ops/local/acceptance.py`; `just acceptance` writes the scenario page of design 7.1. Written first, so it fails now and counts progress | none | T-13 | DONE: 0 of 10 scenarios pass until T-04 to T-10 land |
 | T-11 | Confirm on macOS | Jim runs `cd cli && just test && just acceptance` on macOS, both pass, and the page shows the expected results | Jim | T-07, T-14 | TODO |
@@ -184,6 +184,13 @@ adaptation.
 roots on the first sync (`--allow-unrelated-histories`), the three-part rule for a changed range, and the schema
 details (accepted needs `marq:resultBlob`, body forms per motivation, line numbering of the fragment selector).
 T-07 must exercise the real binary with several processes, since T-04's tests use threads in one process.
+
+**T-06 and T-10 note (2026-10-01)**: built in parallel by two Sonnet subagents, merged, and checked by the
+orchestrator: 141 tests pass, clippy and fmt are clean, and `just acceptance` reports 10 of 10. The pages were
+looked at in headless Chromium, not only counted. One real bug came out of the build and is fixed in the design:
+`created` has whole-second resolution, so `reject` then `reopen` inside one second folded to `rejected` half the
+time. The CLI now steps a new state change one second past the latest. Two clones deciding in the same second still
+order by random id, which T-07 must exercise.
 
 **T-14 note**: the acceptance run is test-first. `cd cli && just acceptance` runs ten
 scenarios and writes `cli/target/acceptance/index.html`. With no crate yet, all ten fail with
