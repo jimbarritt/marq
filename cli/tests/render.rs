@@ -1,7 +1,7 @@
 //! Tests for the static HTML page (T-10). Threads are hand-written in the shape
 //! of design 6.2, so the page is tested without a git repository.
 
-use marq_comments::render::render_page;
+use marq_comments::render::{render_page, render_source_page};
 use serde_json::{json, Value};
 
 const TEST_MD: &str = include_str!("../../example-docs/test.md");
@@ -106,7 +106,14 @@ fn reply(id: &str, author: &str, body: &str, agent: bool) -> Value {
     })
 }
 
+/// The source view, which the tests above this line exercise.
 fn page(markdown: &str, threads: &[T]) -> String {
+    let values: Vec<Value> = threads.iter().map(T::json).collect();
+    render_source_page(markdown, &values)
+}
+
+/// The rendered view, the default.
+fn rpage(markdown: &str, threads: &[T]) -> String {
     let values: Vec<Value> = threads.iter().map(T::json).collect();
     render_page(markdown, &values)
 }
@@ -130,7 +137,10 @@ fn source_html(html: &str) -> &str {
 /// The text inside every `<mark>` that belongs to `thread` (1-based position in
 /// the input), joined, with nested marks and links walked through.
 fn marked_text(html: &str, thread: usize) -> String {
-    let source = source_html(html);
+    marked_text_in(source_html(html), thread)
+}
+
+fn marked_text_in(source: &str, thread: usize) -> String {
     let want = format!("data-thread=\"t-{thread}\"");
     let mut stack: Vec<bool> = Vec::new();
     let mut out = String::new();
@@ -534,77 +544,653 @@ fn a_hostile_state_does_not_reach_a_class_attribute() {
     assert!(!html.contains("onmouseover=\"alert"));
 }
 
-/// Writes a realistic page to `target/render-sample.html` so a person can open
-/// it. It asserts only that the file was written.
+/// Writes a realistic source-view page to `target/render-sample-source.html`.
+/// The rendered view's sample is written by `writes_a_rendered_sample_page`.
 #[test]
 fn writes_a_sample_page() {
-    let text = "# Plan\n\nThe build uses esbuild for bundling.\nWe ship café menus and 🦀 stickers.\n\
-                The count in settings is three.\nThis sentence was reworded later.\n\
-                A very long line that goes on and on to check that the source pane scrolls sideways rather than pushing the page wider than the screen.\n";
-    let at = |needle: &str| {
-        let byte = text.find(needle).unwrap();
-        let start = text[..byte].chars().count();
-        (start, start + needle.chars().count())
-    };
-    let (s, e) = at("esbuild");
-    let mut open = T::new("4f0c2d1e", anchored(s, e));
-    open.quote = "esbuild";
-    open.body = "Why not Vite?\nIt would need a plugin per target.";
-    open.replies = vec![{
-        let mut r = reply(
-            "9a7b2c11",
-            "Claude",
-            "Obsidian plugins ship one CJS file.",
-            true,
+    let html = sample_html(render_source_page);
+    write_sample("render-sample-source.html", &html);
+}
+
+// ---- the rendered view ----
+
+/// The code-point range of the `nth` (0-based) occurrence of `needle`.
+fn at_nth(text: &str, needle: &str, nth: usize) -> (usize, usize) {
+    let byte = text
+        .match_indices(needle)
+        .nth(nth)
+        .unwrap_or_else(|| panic!("{needle:?} not found"))
+        .0;
+    let start = text[..byte].chars().count();
+    (start, start + needle.chars().count())
+}
+
+fn at(text: &str, needle: &str) -> (usize, usize) {
+    at_nth(text, needle, 0)
+}
+
+fn on(text: &str, needle: &str) -> T {
+    let (s, e) = at(text, needle);
+    T::new("aaaaaaaa", anchored(s, e))
+}
+
+/// The document pane of the rendered view.
+fn doc_html(html: &str) -> &str {
+    let open = "<article class=\"markdown-body\">";
+    let from = html.find(open).expect("document article") + open.len();
+    let to = from + html[from..].find("</article>").expect("closing article");
+    &html[from..to]
+}
+
+/// What the single thread on `needle` marks in the rendered view.
+fn marks(text: &str, needle: &str) -> String {
+    let html = rpage(text, &[on(text, needle)]);
+    marked_text_in(doc_html(&html), 1)
+}
+
+#[test]
+fn a_mark_covers_exactly_its_characters_in_a_paragraph() {
+    assert_eq!(marks("Hello brave new world\n", "brave new"), "brave new");
+    let html = rpage("Hello brave world\n", &[on("Hello brave world\n", "brave")]);
+    assert!(html
+        .contains("<p>Hello <a class=\"ref\" href=\"#t-1\">1</a><mark class=\"s-open anchored\""));
+    assert!(html.contains(">brave</mark> world</p>"));
+}
+
+#[test]
+fn a_mark_works_in_bold_italic_and_inline_code() {
+    assert_eq!(marks("a **bold word** here\n", "bold"), "bold");
+    assert_eq!(marks("a *slanted word* here\n", "word"), "word");
+    assert_eq!(marks("use `cargo test` now\n", "cargo test"), "cargo test");
+    assert_eq!(marks("use ``a ` b`` now\n", "a ` b"), "a ` b");
+    assert_eq!(marks("a ~~struck~~ here\n", "struck"), "struck");
+    let html = rpage(
+        "a **bold word** here\n",
+        &[on("a **bold word** here\n", "bold")],
+    );
+    assert!(doc_html(&html).contains("<strong>"));
+}
+
+#[test]
+fn a_mark_works_in_a_heading_a_list_item_and_a_table_cell() {
+    assert_eq!(marks("## The Title here\n", "Title"), "Title");
+    assert_eq!(
+        marks("- one\n- two items\n  - nested thing\n", "two"),
+        "two"
+    );
+    assert_eq!(
+        marks("- one\n- two items\n  - nested thing\n", "nested thing"),
+        "nested thing"
+    );
+    assert_eq!(marks("1. first\n2. second\n", "second"), "second");
+    let table = "| a | b |\n|---|---|\n| left cell | right cell |\n";
+    assert_eq!(marks(table, "right cell"), "right cell");
+    assert_eq!(marks(table, "a"), "a");
+    assert_eq!(marks("> quoted words\n", "words"), "words");
+}
+
+#[test]
+fn a_mark_works_in_a_fenced_code_block() {
+    let md = "Before\n\n```rust\nlet x = 1;\nlet y = 2;\n```\n\nAfter\n";
+    assert_eq!(marks(md, "x = 1"), "x = 1");
+    // Across two lines, the newline between them is marked too.
+    assert_eq!(marks(md, "1;\nlet y"), "1;\nlet y");
+    let html = rpage(md, &[on(md, "x = 1")]);
+    assert!(html.contains("<pre><code class=\"language-rust\">"));
+    let indented = "para\n\n    indented code\n    more\n";
+    assert_eq!(marks(indented, "indented code"), "indented code");
+}
+
+#[test]
+fn a_mark_works_in_a_link_text() {
+    let md = "See [the link text](https://example.com/x) now\n";
+    assert_eq!(marks(md, "link text"), "link text");
+    let html = rpage(md, &[on(md, "link text")]);
+    assert!(html.contains("<a href=\"https://example.com/x\" rel=\"noopener noreferrer\">"));
+}
+
+#[test]
+fn a_range_across_bold_and_plain_text_is_split_but_covers_all_of_it() {
+    let md = "start **bold** tail end\n";
+    let (s, _) = at(md, "start");
+    let (_, e) = at(md, "tail");
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
+    assert_eq!(marked_text_in(doc_html(&html), 1), "start bold tail");
+    // One mark per rendered text piece: "start ", "bold" and " tail".
+    assert_eq!(html.matches("data-thread=\"t-1\"").count(), 3);
+    // One reference number for the thread, not one per piece.
+    assert_eq!(html.matches("class=\"ref\"").count(), 1);
+}
+
+#[test]
+fn a_range_across_a_soft_line_break_and_two_paragraphs_is_marked() {
+    assert_eq!(marks("line one\nline two\n", "one\nline"), "one\nline");
+    let md = "first para\n\nsecond para\n";
+    let (s, _) = at(md, "para");
+    let (_, e) = at(md, "second");
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
+    assert_eq!(marked_text_in(doc_html(&html), 1), "parasecond");
+}
+
+#[test]
+fn overlapping_and_adjacent_ranges_are_marked_by_thread() {
+    let md = "alpha beta gamma delta\n";
+    let (a, _) = at(md, "alpha");
+    let (_, b) = at(md, "beta");
+    let (c, _) = at(md, "beta");
+    let (_, d) = at(md, "gamma");
+    let html = rpage(
+        md,
+        &[
+            T::new("aaaaaaaa", anchored(a, b)),
+            T::new("bbbbbbbb", anchored(c, d)),
+        ],
+    );
+    let doc = doc_html(&html);
+    assert_eq!(marked_text_in(doc, 1), "alpha beta");
+    assert_eq!(marked_text_in(doc, 2), "beta gamma");
+    // The shared word sits inside both marks, outermost first.
+    assert!(doc.contains("title=\"bbbbbbbb open (anchored)\">beta</mark></mark>"));
+
+    let md = "abcdef\n";
+    let html = rpage(
+        md,
+        &[
+            T::new("aaaaaaaa", anchored(0, 3)),
+            T::new("bbbbbbbb", anchored(3, 6)),
+        ],
+    );
+    let doc = doc_html(&html);
+    assert_eq!(marked_text_in(doc, 1), "abc");
+    assert_eq!(marked_text_in(doc, 2), "def");
+    assert!(doc.contains("abc</mark><a class=\"ref\" href=\"#t-2\">2</a><mark"));
+}
+
+#[test]
+fn ranges_after_non_ascii_text_land_on_the_right_characters() {
+    let md = "café 🦀 naïve **bold** 🦀 end\n";
+    assert_eq!(marks(md, "bold"), "bold");
+    assert_eq!(marks(md, "naïve"), "naïve");
+    assert_eq!(marks(md, "🦀 end"), "🦀 end");
+    let md = "# Crème brûlée\n\n- ünïcode 🦀 item\n";
+    assert_eq!(marks(md, "item"), "item");
+    assert_eq!(marks(md, "brûlée"), "brûlée");
+}
+
+#[test]
+fn a_range_over_escaped_text_marks_at_least_the_escaped_text() {
+    // The escapes make the rendered text differ from the source slice for the
+    // backslash itself, so this is the approximate case: every character of the
+    // rendered `*literal*` must be inside the mark.
+    let md = "before \\*literal\\* after\n";
+    let marked = marks(md, "\\*literal\\*");
+    assert!(marked.contains("*literal*"), "{marked}");
+    assert!(
+        !marked.contains("before") && !marked.contains("after"),
+        "{marked}"
+    );
+    // An entity is the same: the whole event is marked.
+    assert_eq!(marks("fish &amp; chips\n", "&amp;"), "&");
+}
+
+#[test]
+fn a_range_over_syntax_the_renderer_drops_gets_a_flagged_card_and_a_number() {
+    let md = "# Title\n\nPara\n";
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(0, 1))]);
+    assert_eq!(marked_text_in(doc_html(&html), 1), "");
+    assert!(!doc_html(&html).contains("<mark"));
+    // The number sits at the next rendered text, in the heading.
+    assert!(doc_html(&html)
+        .contains("<h1 id=\"md-title\"><a class=\"ref\" href=\"#t-1\">1</a>Title</h1>"));
+    assert!(html.contains("id=\"t-1\""));
+    assert!(html.contains("no rendered text"));
+
+    let md = "para\n\n---\n\nafter\n";
+    let (s, e) = at(md, "---");
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
+    assert!(!doc_html(&html).contains("<mark"));
+    assert!(doc_html(&html).contains("<a class=\"ref\" href=\"#t-1\">1</a><hr>"));
+    assert!(html.contains("no rendered text"));
+
+    // A link destination has no rendered text either.
+    let md = "[text](https://example.com/dest)\n";
+    let html = rpage(md, &[on(md, "https://example.com/dest")]);
+    assert!(!doc_html(&html).contains("<mark"));
+    assert!(html.contains("no rendered text"));
+    // A thread that does mark text is not flagged.
+    let html = rpage(md, &[on(md, "text")]);
+    assert!(!html.contains("no rendered text"));
+}
+
+#[test]
+fn a_thread_after_the_last_rendered_text_still_gets_its_number() {
+    let md = "text\n\n---\n";
+    let (s, e) = at(md, "---");
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
+    assert_eq!(html.matches("class=\"ref\"").count(), 1);
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(md.len(), md.len()))]);
+    assert_eq!(html.matches("class=\"ref\"").count(), 1);
+}
+
+#[test]
+fn raw_html_in_the_document_is_shown_as_text() {
+    let md = "<div onclick=\"x()\">hi</div>\n\ninline <b>bold</b> and </pre><script>alert(1)</script>\n\n<script>\nalert(2)\n</script>\n";
+    let html = rpage(md, &[]);
+    let doc = doc_html(&html);
+    assert!(!doc.contains("<div"));
+    assert!(!doc.contains("<b>"));
+    assert!(!doc.contains("<script"));
+    assert!(!doc.contains("</pre><script"));
+    assert!(doc.contains("&lt;div onclick=&quot;x()&quot;&gt;"));
+    assert!(doc.contains("&lt;/pre&gt;&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert!(doc.contains("&lt;b&gt;bold&lt;/b&gt;"));
+    assert!(!html.contains("<script"));
+    assert!(!html.contains("onclick=\"x"));
+}
+
+#[test]
+fn a_range_over_raw_html_marks_its_escaped_text() {
+    let md = "a <b>bold</b> c\n";
+    assert_eq!(marks(md, "<b>bold</b>"), "<b>bold</b>");
+    let html = rpage(md, &[on(md, "<b>")]);
+    assert!(html.contains("&lt;b&gt;</mark>"));
+}
+
+#[test]
+fn only_http_https_mailto_and_fragment_links_get_an_href() {
+    let md = "[js](javascript:alert(1)) [rel](docs/x.md) [data](data:text/html,x) \
+              [web](https://example.com/a) [plain](http://example.com) [mail](mailto:a@b.example) \
+              [up](JAVASCRIPT:x) [frag](#some-heading) <https://auto.example/p> <me@auto.example>\n";
+    let html = rpage(md, &[]);
+    let doc = doc_html(&html);
+    assert!(!doc.to_lowercase().contains("href=\"javascript"));
+    assert!(!doc.contains("href=\"docs"));
+    assert!(!doc.contains("href=\"data:"));
+    assert!(doc.contains("<span class=\"nolink\" title=\"link: javascript:alert(1)\">js</span>"));
+    assert!(doc.contains("<span class=\"nolink\" title=\"link: docs/x.md\">rel</span>"));
+    assert!(doc.contains("<a href=\"https://example.com/a\" rel=\"noopener noreferrer\">web</a>"));
+    assert!(doc.contains("<a href=\"http://example.com\" rel=\"noopener noreferrer\">plain</a>"));
+    assert!(doc.contains("<a href=\"mailto:a@b.example\" rel=\"noopener noreferrer\">mail</a>"));
+    assert!(doc.contains("<a href=\"#md-some-heading\">frag</a>"));
+    assert!(doc.contains("<a href=\"https://auto.example/p\" rel=\"noopener noreferrer\">"));
+    assert!(doc.contains("<a href=\"mailto:me@auto.example\" rel=\"noopener noreferrer\">"));
+    // A quote in a destination cannot leave the attribute.
+    let html = rpage("[x](https://example.com/\"onmouseover=\"alert(1))\n", &[]);
+    assert!(!html.contains("\"onmouseover"));
+}
+
+#[test]
+fn an_image_is_a_box_with_its_alt_text_and_loads_nothing() {
+    let md = "An ![alt *text* here](https://tracker.example/p.png \"a title\") image\n";
+    let html = rpage(md, &[on(md, "text")]);
+    let doc = doc_html(&html);
+    assert!(!html.contains("<img"));
+    assert!(!html.contains("src="));
+    assert!(doc.contains(
+        "<span class=\"img\" title=\"image: https://tracker.example/p.png (a title)\">alt <em>"
+    ));
+    assert_eq!(marked_text_in(doc, 1), "text");
+}
+
+#[test]
+fn the_rendered_page_loads_nothing_for_any_input() {
+    let hostile = "<img src=x onerror=alert(1)>\n\n![a](https://x.example/a.png)\n\n\
+                   <link rel=stylesheet href=//x.example/s.css>\n<iframe src=//x.example></iframe>\n\
+                   <style>body{background:url(//x.example/b.png)}</style>\n\n[a](javascript:alert(1))\n\n\
+                   `<script>` and <script src=//x.example/s.js></script>\n";
+    for (md, word) in [(hostile, "alert"), (TEST_MD, "Test")] {
+        let html = rpage(md, &[on(md, word)]);
+        // Text such as `src=` or `url(` may appear escaped inside the hostile
+        // document's own words, so the strict list applies to the example
+        // document, and the markup forms to both.
+        let strict: &[&str] = if md == TEST_MD {
+            &["src=", "url(", "@import"]
+        } else {
+            &["src=\"", "src='"]
+        };
+        for banned in [
+            "<img",
+            "<script",
+            "<iframe",
+            "<link",
+            "<style>body",
+            "<input src",
+        ]
+        .iter()
+        .chain(strict)
+        {
+            assert!(!html.contains(banned), "{banned}");
+        }
+        // The page's own single style element is the only one.
+        assert_eq!(html.matches("<style").count(), 1);
+        for attribute in ["src=\"", "action=\"", "data=\"http"] {
+            assert!(!html.contains(attribute), "{attribute}");
+        }
+        // External links are allowed, always with rel.
+        for part in html.split("href=\"http").skip(1) {
+            let tag = &part[..part.find('>').unwrap()];
+            assert!(tag.contains("rel=\"noopener noreferrer\""), "{tag}");
+        }
+    }
+}
+
+/// The values of every `id="..."` attribute.
+fn ids(html: &str) -> Vec<String> {
+    html.split(" id=\"")
+        .skip(1)
+        .map(|p| p[..p.find('"').unwrap()].to_string())
+        .collect()
+}
+
+#[test]
+fn heading_ids_and_fragment_links_agree_and_cannot_collide_with_cards() {
+    let md = "# Hello World\n\n## Hello World\n\n## t-1\n\n### GPT-5.4 & Co.\n\n## Math / LaTeX\n\n\
+              ## Ünïcode Ünderscore_ok\n\n[a](#hello-world) [b](#hello-world-1) [c](#t-1) [d](#math--latex)\n";
+    let (s, e) = at(md, "Hello");
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
+    let all = ids(&html);
+    let mut unique = all.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(all.len(), unique.len(), "duplicate ids: {all:?}");
+    for want in [
+        "md-hello-world",
+        "md-hello-world-1",
+        "md-t-1",
+        "md-gpt-54--co",
+        "md-math--latex",
+        "md-ünïcode-ünderscore_ok",
+        "t-1",
+    ] {
+        assert!(all.iter().any(|i| i == want), "{want} in {all:?}");
+    }
+    // The card keeps `t-1`; the heading titled "t-1" does not take it.
+    assert_eq!(html.matches("id=\"t-1\"").count(), 1);
+    for link in [
+        "#md-hello-world\"",
+        "#md-hello-world-1\"",
+        "#md-t-1\"",
+        "#md-math--latex\"",
+    ] {
+        assert!(html.contains(&format!("href=\"{link}")), "{link}");
+    }
+}
+
+#[test]
+fn every_fragment_link_in_the_example_document_has_a_target() {
+    let html = rpage(TEST_MD, &[]);
+    let all = ids(&html);
+    let mut checked = 0;
+    for part in html.split("href=\"#").skip(1) {
+        let target = &part[..part.find('"').unwrap()];
+        if target.is_empty() {
+            continue;
+        }
+        assert!(target.starts_with("md-"), "{target}");
+        assert!(all.iter().any(|i| i == target), "{target} has no heading");
+        checked += 1;
+    }
+    assert!(checked >= 20, "{checked} links checked");
+}
+
+#[test]
+fn a_table_renders_as_a_table_with_alignment() {
+    let md = "| L | C | R |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n";
+    let html = rpage(md, &[]);
+    let doc = doc_html(&html);
+    assert!(doc.contains("<div class=\"table-wrap\"><table>"));
+    assert!(doc.contains("<thead><tr><th class=\"a-left\">L</th><th class=\"a-center\">C</th><th class=\"a-right\">R</th></tr></thead>"));
+    assert!(doc.contains("<tbody>"));
+    assert_eq!(doc.matches("<tr>").count(), 3);
+    assert!(doc.contains("<td class=\"a-right\">6</td>"));
+    assert!(doc.contains("</tbody></table></div>"));
+}
+
+#[test]
+fn task_lists_show_disabled_checkboxes() {
+    let md = "- [x] done\n- [ ] todo\n- plain\n";
+    let html = rpage(md, &[on(md, "todo")]);
+    let doc = doc_html(&html);
+    assert!(doc.contains("<li class=\"task\"><input type=\"checkbox\" disabled checked> done</li>"));
+    assert!(doc.contains("<input type=\"checkbox\" disabled> "));
+    assert!(doc.contains("<li>plain</li>"));
+    assert_eq!(marked_text_in(doc, 1), "todo");
+}
+
+#[test]
+fn blocks_render_as_html() {
+    let md = "# H1\n\n## H2\n\n###### H6\n\nA *em* **strong** ~~gone~~ `code`.\n\n> quote\n\n---\n\n\
+              1. one\n2. two\n\nbreak\n\n5. five\n\n```\nplain\n```\n\nNote[^1]\n\n[^1]: The note.\n";
+    let html = rpage(md, &[]);
+    let doc = doc_html(&html);
+    for want in [
+        "<h1 id=\"md-h1\">H1</h1>",
+        "<h2 id=\"md-h2\">H2</h2>",
+        "<h6 id=\"md-h6\">H6</h6>",
+        "<em>em</em>",
+        "<strong>strong</strong>",
+        "<s>gone</s>",
+        "<code>code</code>",
+        "<blockquote>",
+        "<hr>",
+        "<ol>",
+        "<ol start=\"5\">",
+        "<pre><code>plain\n</code></pre>",
+        "<a href=\"#md-fn-1\">1</a>",
+        "id=\"md-fn-1\"",
+    ] {
+        assert!(doc.contains(want), "{want}\n{doc}");
+    }
+    // Strikethrough must not use `del`, which the cards style as a deletion.
+    assert!(!doc.contains("<del>"));
+}
+
+#[test]
+fn the_rendered_page_keeps_the_cards_orphans_applied_and_summary() {
+    let md = "# Title\n\nSome words here\n";
+    let mut open = on(md, "words");
+    open.replies = vec![reply("9a7b2c11", "Claude", "A reply.", true)];
+    let mut resolved = on(md, "Some");
+    resolved.state = "resolved";
+    let mut accepted = on(md, "here");
+    accepted.state = "accepted";
+    accepted.suggestion = Some("there");
+    accepted.quote = "here";
+    let mut rejected = on(md, "Title");
+    rejected.state = "rejected";
+    let (s, e) = at(md, "Title");
+    let mut moved = T::new("cccccccc", changed(s, e, "terms"));
+    moved.quote = "terms";
+    let mut lost = T::new("dddddddd", orphaned());
+    lost.quote = "A line that went.";
+    let deleted = T::new("eeeeeeee", json!({"status": "applied"}));
+    let html = rpage(
+        md,
+        &[open, resolved, accepted, rejected, moved, lost, deleted],
+    );
+    assert!(html.contains("7 threads: 4 anchored, 1 changed, 1 orphaned, 1 applied"));
+    assert!(html.contains("<aside class=\"cards\""));
+    assert!(html.contains("<h2>Orphaned comments</h2>"));
+    assert!(html.contains("<h2>Applied deletions</h2>"));
+    assert!(html.contains("A line that went."));
+    assert!(html.contains("<p class=\"was\">was <q>terms</q></p>"));
+    assert!(html.contains("<del>here</del>"));
+    assert!(html.contains("<ins>there</ins>"));
+    assert!(html.contains("(agent)"));
+    for class in [
+        "s-open anchored",
+        "s-resolved anchored",
+        "s-accepted anchored",
+        "s-rejected anchored",
+        "s-open changed",
+    ] {
+        assert!(
+            html.contains(&format!("<mark class=\"{class}\"")),
+            "{class}"
         );
+    }
+    for n in 1..=5 {
+        assert!(html.contains(&format!("<a class=\"ref\" href=\"#t-{n}\">{n}</a>")));
+        assert!(html.contains("<article class=\"card s-"));
+        assert!(html.contains(&format!("id=\"t-{n}\"")));
+    }
+    // No line-number gutter in the rendered view, and no source pre.
+    assert!(!html.contains("class=\"gutter\""));
+    assert!(!html.contains("<pre class=\"source\">"));
+    assert!(html.contains("@media (max-width: 60rem)"));
+    assert!(html.contains("prefers-color-scheme: dark"));
+}
+
+#[test]
+fn the_rendered_page_handles_no_threads_and_no_text() {
+    let html = rpage("# Title\n\nbody\n", &[]);
+    assert!(html.contains("0 threads: 0 anchored, 0 changed, 0 orphaned"));
+    assert!(html.contains("No comments"));
+    assert!(html.contains("<h1 id=\"md-title\">Title</h1>"));
+    assert!(!html.contains("<mark"));
+    assert!(!html.contains("<article class=\"card"));
+    let html = rpage("", &[]);
+    assert!(html.contains("<article class=\"markdown-body\">\n</article>"));
+    // A range past the end is clamped, not a panic.
+    let html = rpage("abc\n", &[T::new("aaaaaaaa", anchored(2, 999))]);
+    // The final newline is not rendered text, so only the `c` is marked.
+    assert_eq!(marked_text_in(doc_html(&html), 1), "c");
+}
+
+#[test]
+fn the_example_document_renders_with_threads_in_each_kind_of_block() {
+    let title = at(TEST_MD, "Test");
+    let cell = at(TEST_MD, "Avast ye scurvy dogs");
+    let code = at(TEST_MD, "fibonacci(n - 1)");
+    let item = at(TEST_MD, "Another nested");
+    let threads: Vec<T> = [title, cell, code, item]
+        .iter()
+        .map(|(s, e)| T::new("aaaaaaaa", anchored(*s, *e)))
+        .collect();
+    let html = rpage(TEST_MD, &threads);
+    let doc = doc_html(&html);
+    assert_eq!(marked_text_in(doc, 1), "Test");
+    assert_eq!(marked_text_in(doc, 2), "Avast ye scurvy dogs");
+    assert_eq!(marked_text_in(doc, 3), "fibonacci(n - 1)");
+    assert_eq!(marked_text_in(doc, 4), "Another nested");
+    assert!(doc.contains("<table>"));
+    assert!(doc.contains("<pre><code class=\"language-mermaid\">"));
+    assert!(doc.contains("<input type=\"checkbox\" disabled checked>"));
+    assert!(doc.contains("<h2 id=\"md-contents\">Contents</h2>"));
+    assert!(doc.contains("<s>strikethrough</s>"));
+    assert!(doc.contains("<hr>"));
+}
+
+#[test]
+fn a_thread_at_many_offsets_of_the_example_document_does_not_panic() {
+    // A short thread at every seventh offset, in one page: exercises every
+    // construct's boundary handling, including multi-byte characters.
+    let len = TEST_MD.chars().count();
+    let threads: Vec<T> = (0..len)
+        .step_by(7)
+        .map(|s| T::new("aaaaaaaa", anchored(s, (s + 3).min(len))))
+        .collect();
+    let html = rpage(TEST_MD, &threads);
+    assert!(html.contains("<mark"));
+    assert!(!html.contains("<script"));
+}
+
+#[test]
+fn the_source_view_is_not_the_rendered_view() {
+    let md = "# Title\n\nbody\n";
+    let html = page(md, &[]);
+    assert!(html.contains("<pre class=\"source\"># Title\n\nbody\n</pre>"));
+    assert!(!html.contains("markdown-body"));
+}
+
+fn sample_html(render: fn(&str, &[Value]) -> String) -> String {
+    let text = TEST_MD;
+    let mut open = on(text, "document for **Marq**");
+    open.id = "4f0c2d1e";
+    open.quote = "document for **Marq**";
+    open.body = "Why not call it a viewer?\nIt also adds comments.";
+    open.replies = vec![{
+        let mut r = reply("9a7b2c11", "Claude", "The CLI renders it too.", true);
         r["replies"] = json!([reply("1b2c3d4e", "Jim", "Fair enough.", false)]);
         r
     }];
 
-    let (s, e) = at("café menus");
-    let mut resolved = T::new("2a3b4c5d", anchored(s, e));
+    let mut resolved = on(text, "sub-document");
+    resolved.id = "2a3b4c5d";
     resolved.state = "resolved";
-    resolved.quote = "café menus";
-    resolved.body = "Is this the right spelling?";
+    resolved.quote = "sub-document";
+    resolved.body = "Is the link right?";
 
-    let (s, e) = at("three");
-    let mut accepted = T::new("5e6f7a8b", anchored(s, e));
+    let mut accepted = on(text, "Avast ye scurvy dogs");
+    accepted.id = "5e6f7a8b";
     accepted.state = "accepted";
-    accepted.suggestion = Some("five");
-    accepted.quote = "three";
-    accepted.body = "The count in settings is five.";
+    accepted.suggestion = Some("Ahoy me hearties");
+    accepted.quote = "Avast ye scurvy dogs";
+    accepted.body = "Friendlier.";
     accepted.author = "Claude";
     accepted.agent = true;
 
-    let (s, e) = at("🦀 stickers");
-    let mut rejected = T::new("6c7d8e9f", anchored(s, e));
+    let mut rejected = on(text, "Second item");
+    rejected.id = "6c7d8e9f";
     rejected.state = "rejected";
-    rejected.suggestion = Some("crab stickers");
-    rejected.quote = "🦀 stickers";
-    rejected.body = "Emoji may not print.";
+    rejected.suggestion = Some("Item two");
+    rejected.quote = "Second item";
+    rejected.body = "Consistent naming.";
 
-    let (s, e) = at("esbuild for");
-    let mut overlap = T::new("7d8e9fa0", anchored(s + 3, e));
-    overlap.quote = "build for";
-    overlap.body = "An overlapping range.";
+    let first = at(text, "Hoist the mainsail afore the parrot");
+    let second = at(text, "afore the parrot pilfers");
+    let mut overlap_a = T::new("7d8e9fa0", anchored(first.0, first.1));
+    overlap_a.body = "Two threads share these words.";
+    let mut overlap_b = T::new("7d8e9fa1", anchored(second.0, second.1));
+    overlap_b.body = "The second overlaps the first.";
 
-    let (s, e) = at("reworded");
-    let mut moved = T::new("8e9fa0b1", changed(s, e, "written"));
-    moved.quote = "written";
-    moved.body = "Check the wording.";
+    let (s, e) = at(text, "fibonacci(n - 1)");
+    let mut moved = T::new("8e9fa0b1", changed(s, e, "fib(n - 1)"));
+    moved.quote = "fib(n - 1)";
+    moved.body = "The function was renamed.";
+
+    let (s, e) = at(text, "✨");
+    let mut emoji = T::new("8e9fa0b2", anchored(s, e));
+    emoji.body = "After non-ASCII text, bytes and code points differ.";
+
+    let rule = text.find("\n---\n").unwrap() + 1;
+    let (s, e) = at(text, &text[rule..rule + 3]);
+    let mut hr = T::new("8e9fa0b3", anchored(s, e));
+    hr.body = "A rule has no rendered text.";
 
     let mut lost = T::new("9fa0b1c2", orphaned());
     lost.quote = "A sentence that was deleted.";
     lost.body = "This line has gone.";
     lost.replies = vec![reply("a0b1c2d3", "Jim", "Do we still need it?", false)];
 
-    let html = page(
-        text,
-        &[open, resolved, accepted, rejected, overlap, moved, lost],
-    );
+    let mut deleted = T::new("b1c2d3e4", json!({"status": "applied"}));
+    deleted.quote = "removed words";
+    deleted.suggestion = Some("");
+    deleted.state = "accepted";
+    deleted.body = "Cut it.";
+
+    let values: Vec<Value> = [
+        open, resolved, accepted, rejected, overlap_a, overlap_b, moved, emoji, hr, lost, deleted,
+    ]
+    .iter()
+    .map(T::json)
+    .collect();
+    render(text, &values)
+}
+
+fn write_sample(name: &str, html: &str) {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("render-sample.html");
+    let path = dir.join(name);
     std::fs::write(&path, html).unwrap();
     assert!(path.exists());
+}
+
+/// Writes the rendered view of `example-docs/test.md`, with threads of every
+/// state and status, to `target/render-sample.html` so a person can open it.
+#[test]
+fn writes_a_rendered_sample_page() {
+    let html = sample_html(render_page);
+    assert!(html.contains("<table>"));
+    write_sample("render-sample.html", &html);
 }
