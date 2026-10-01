@@ -6,6 +6,7 @@
 pub mod anchor; // T-05: selectors, resolving an anchor against changed text
 pub mod cli; // T-06: command-line arguments
 pub mod commands; // T-06: one function per command
+pub mod error; // T-04: the crate's error type
 pub mod git; // T-04: a thin wrapper around the `git` binary
 pub mod model; // T-04: annotation and state-change records
 pub mod output; // T-06: text and JSON output
