@@ -853,17 +853,107 @@ fn only_http_https_mailto_and_fragment_links_get_an_href() {
     assert!(!html.contains("\"onmouseover"));
 }
 
+/// The camera icon's markup, from its opening tag to its closing one.
+fn svg_of(html: &str) -> &str {
+    let from = html.find("<svg").expect("an svg icon");
+    &html[from..from + html[from..].find("</svg>").expect("svg end") + "</svg>".len()]
+}
+
+/// The text a reader sees: the HTML with its tags removed.
+fn visible_text(html: &str) -> String {
+    html.split('<')
+        .map(|part| part.split_once('>').map_or(part, |x| x.1))
+        .collect()
+}
+
 #[test]
-fn an_image_is_a_box_with_its_alt_text_and_loads_nothing() {
+fn an_image_is_only_a_camera_icon_and_loads_nothing() {
     let md = "An ![alt *text* here](https://tracker.example/p.png \"a title\") image\n";
-    let html = rpage(md, &[on(md, "text")]);
+    let html = rpage(md, &[]);
     let doc = doc_html(&html);
     assert!(!html.contains("<img"));
     assert!(!html.contains("src="));
+    assert!(!html.contains("url("));
     assert!(doc.contains(
-        "<span class=\"img\" title=\"image: https://tracker.example/p.png (a title)\">alt <em>"
+        "<span class=\"img\" role=\"img\" aria-label=\"alt text here\" \
+         title=\"alt text here (https://tracker.example/p.png)\"><svg "
     ));
-    assert_eq!(marked_text_in(&doc, 1), "text");
+    // The alt text is the accessible name, not visible text.
+    assert_eq!(visible_text(&doc).trim(), "An  image");
+    assert_eq!(doc.matches("<svg").count(), 1);
+    assert!(svg_of(&doc).contains("aria-hidden=\"true\""));
+    assert!(svg_of(&doc).contains("viewBox=\"0 0 24 24\""));
+    assert!(svg_of(&doc).contains("stroke=\"currentColor\""));
+}
+
+#[test]
+fn the_icon_loads_nothing_and_carries_no_style() {
+    let html = rpage(TEST_MD, &[]);
+    assert!(html.contains("<svg"));
+    for (at, _) in html.match_indices("<svg") {
+        let rest = &html[at..];
+        let svg = &rest[..rest.find("</svg>").unwrap()];
+        for banned in ["<image", "href", "xlink", "<script", "style=", "url("] {
+            assert!(!svg.contains(banned), "{banned}");
+        }
+    }
+}
+
+#[test]
+fn the_image_label_and_title_are_escaped() {
+    let md = "![a\"><script>x</script>](u\"><b>.png)\n";
+    let html = rpage(md, &[]);
+    assert!(!html.contains("<script"));
+    assert!(!html.contains("<b>"));
+    assert!(html.contains("aria-label=\"a&quot;&gt;&lt;script&gt;x&lt;/script&gt;\""));
+    assert!(html.contains("(u&quot;&gt;&lt;b&gt;.png)\""));
+}
+
+#[test]
+fn an_image_with_no_alt_text_is_labelled_image() {
+    let md = "![](p.png)\n";
+    let html = rpage(md, &[]);
+    assert!(html.contains("aria-label=\"image\""));
+    assert!(html.contains("title=\"image (p.png)\""));
+}
+
+#[test]
+fn a_mark_over_an_images_alt_text_wraps_the_icon() {
+    let md = "An ![alt *text* here](p.png) image\n";
+    let html = rpage(md, &[on(md, "text")]);
+    let doc = doc_html(&html);
+    let mark = doc.find("<mark data-thread=\"t-1\"").unwrap();
+    let span = doc.find("<span class=\"img\"").unwrap();
+    let svg_end = doc.find("</svg>").unwrap();
+    assert!(mark < span);
+    assert!(doc[svg_end..].starts_with("</svg></span></mark><a class=\"ref\" href=\"#t-1\">1</a>"));
+    assert!(html.contains("<article class=\"card\" id=\"t-1\""));
+    assert!(!html.contains("no rendered text"));
+}
+
+#[test]
+fn a_range_over_part_of_an_images_syntax_marks_the_icon() {
+    let md = "An ![alt](https://x.example/p.png) image\n";
+    for needle in [
+        "![",
+        "x.example",
+        "alt",
+        "](",
+        ".png)",
+        "![alt](https://x.example/p.png)",
+    ] {
+        let html = rpage(md, &[on(md, needle)]);
+        let doc = doc_html(&html);
+        assert!(
+            doc.contains("<mark data-thread=\"t-1\"")
+                && doc.contains("</svg></span></mark><a class=\"ref\" href=\"#t-1\">1</a>"),
+            "{needle}"
+        );
+        assert!(!html.contains("no rendered text"), "{needle}");
+    }
+    // A range that only touches the text around the image does not mark it.
+    let html = rpage(md, &[on(md, "An ")]);
+    assert!(!doc_html(&html).contains("</svg></span></mark>"));
 }
 
 #[test]
@@ -1189,6 +1279,11 @@ fn sample_html(render: fn(&str, &[Value]) -> String) -> String {
     title.quote = "Test";
     title.body = "Is \"Test\" the right word for a title?";
 
+    let mut image = on(text, "A hand-drawn pelican wearing a red hat");
+    image.id = "9fa0b1c1";
+    image.quote = "A hand-drawn pelican wearing a red hat";
+    image.body = "Is this the right picture?";
+
     let mut lost = T::new("9fa0b1c2", orphaned());
     lost.quote = "A sentence that was deleted.";
     lost.body = "This line has gone.";
@@ -1201,7 +1296,8 @@ fn sample_html(render: fn(&str, &[Value]) -> String) -> String {
     deleted.body = "Cut it.";
 
     let values: Vec<Value> = [
-        title, open, resolved, accepted, rejected, overlap_a, overlap_b, moved, lost, deleted,
+        title, open, resolved, accepted, rejected, overlap_a, overlap_b, moved, image, lost,
+        deleted,
     ]
     .iter()
     .map(T::json)
@@ -1223,6 +1319,7 @@ fn write_sample(name: &str, html: &str) {
 fn writes_a_rendered_sample_page() {
     let html = sample_html(render_page);
     assert!(html.contains("<table>"));
+    assert!(html.contains("</svg></span></mark>"));
     write_sample("render-sample.html", &html);
 }
 
@@ -1469,17 +1566,65 @@ fn cards_have_no_coloured_state_classes_and_resolved_ones_are_dimmed() {
 }
 
 #[test]
-fn the_margin_stacks_under_its_block_on_a_narrow_screen() {
+fn cards_stack_under_their_block_at_every_width() {
     let html = rpage("a\n", &[]);
-    // Narrow is the default: a thin rule and a small indent, no space when empty.
-    assert!(html.contains(".margin { min-width: 0; display: flex; flex-direction: column;"));
-    assert!(html.contains("padding-left: 12px; border-left: 1px solid var(--line); }"));
-    assert!(html.contains(".margin:empty { display: none; }"));
-    // From 60rem a row is a document column and a margin column.
-    let wide = html.find("@media (min-width: 60rem)").unwrap();
-    let rule = &html[wide..wide + 400];
-    assert!(rule.contains("grid-template-columns: minmax(0, 46rem) 19rem"));
-    assert!(rule.contains(".margin { margin: 0; padding-left: 0; border-left: 0; }"));
+    let style = &html[html.find("<style>").unwrap()..html.find("</style>").unwrap()];
+    // One column: no grid for the layout, no media query that moves cards.
+    assert!(!style.contains("grid-template-columns"));
+    assert!(!style.contains("19rem"));
+    assert!(!style.contains("min-width: 60rem"));
+    for query in style.split("@media").skip(1) {
+        let open = query.find('{').unwrap();
+        if query[..open].contains("prefers-color-scheme") {
+            continue;
+        }
+        let body = &query[open..query.find("\n}").unwrap_or(query.len())];
+        assert!(
+            !body.contains(".margin") && !body.contains(".blk"),
+            "{body}"
+        );
+    }
+    // A thin rule and a small indent, and no space when there are no cards.
+    assert!(style.contains(".margin { min-width: 0; display: flex; flex-direction: column;"));
+    assert!(style.contains("padding-left: 12px; border-left: 1px solid var(--line); }"));
+    assert!(style.contains(".margin:empty { display: none; }"));
+    // A single readable column.
+    assert!(style.contains(".rendered-view main { max-width: 48rem; }"));
+}
+
+#[test]
+fn a_block_holds_its_document_and_then_its_margin() {
+    let md = "para\n\nnext\n";
+    let html = rpage(md, &[thread_on(md, "para", "aaaaaaaa")]);
+    let row = block_rows(&html)[0];
+    let doc = row.find("<div class=\"doc markdown-body\">").unwrap();
+    let margin = row.find("<aside class=\"margin\">").unwrap();
+    let card = row.find("<article").unwrap();
+    assert!(doc < margin && margin < card);
+    // The margin is a sibling after the document, not nested in it.
+    assert!(row[doc..margin].contains("</div>"));
+}
+
+#[test]
+fn the_source_view_has_no_sidebar() {
+    let md = "alpha beta\ngamma\n";
+    let html = page(
+        md,
+        &[
+            thread_on(md, "gamma", "bbbbbbbb"),
+            thread_on(md, "alpha", "aaaaaaaa"),
+        ],
+    );
+    let style = &html[html.find("<style>").unwrap()..html.find("</style>").unwrap()];
+    assert!(!style.contains("grid-template-columns"));
+    assert!(!style.contains("min-width: 60rem"));
+    // The cards come after the source, in one column, ordered by position.
+    let source_end = html.find("</pre>\n</div>\n</section>").unwrap();
+    let cards = html.find("<aside class=\"cards\"").unwrap();
+    assert!(source_end < cards);
+    assert!(cards < html.find("id=\"t-2\"").unwrap());
+    assert!(html.find("id=\"t-2\"").unwrap() < html.find("id=\"t-1\"").unwrap());
+    assert!(style.contains(".cards { display: flex; flex-direction: column;"));
 }
 
 #[test]
