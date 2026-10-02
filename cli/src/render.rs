@@ -22,7 +22,9 @@ use std::ops::Range;
 /// `threads` are the objects `list --json` prints (design 6.2): each has
 /// `annotation`, `state`, `anchor`, `stateChanges` and `replies`.
 ///
-/// The page has no scripts and no external resources. A thread whose anchor has
+/// The rendered page carries one fixed script ([`LAYOUT_SCRIPT`]) that only
+/// moves the cards into a right-hand rail on wide screens; it holds no document
+/// data. The page has no external resources. A thread whose anchor has
 /// no usable range (status `orphaned`, or an anchor object that is missing or
 /// malformed) goes to the orphan section, so no thread is dropped.
 pub fn render_page(markdown: &str, threads: &[Value]) -> String {
@@ -142,7 +144,7 @@ fn build_page(markdown: &str, threads: &[Value], mode: Mode) -> String {
                     None => loose.push(view),
                 }
             }
-            out.push_str("<div class=\"rendered\">\n");
+            out.push_str("<div class=\"page\">\n<div class=\"rendered\">\n");
             for (block, cards) in doc.blocks.iter().zip(&margins) {
                 write_row(
                     &mut out,
@@ -158,7 +160,11 @@ fn build_page(markdown: &str, threads: &[Value], mode: Mode) -> String {
             if !loose.is_empty() {
                 write_row(&mut out, "", "", &loose, markdown, &doc.marked);
             }
-            out.push_str("</div>\n");
+            // The rail stays empty in the HTML. The script fills it, so
+            // without script the cards stay under their blocks.
+            out.push_str(
+                "</div>\n<aside class=\"rail\" aria-label=\"Comments\"></aside>\n</div>\n",
+            );
         }
     }
 
@@ -176,7 +182,11 @@ fn build_page(markdown: &str, threads: &[Value], mode: Mode) -> String {
         }
         out.push_str("</section>\n");
     }
-    out.push_str("</main>\n</body>\n</html>\n");
+    out.push_str("</main>\n");
+    if mode == Mode::Rendered {
+        let _ = writeln!(out, "<script id=\"marq-layout\">\n{LAYOUT_SCRIPT}</script>");
+    }
+    out.push_str("</body>\n</html>\n");
     out
 }
 
@@ -1304,14 +1314,14 @@ const STYLE: &str = r#":root {
   color-scheme: light dark;
   --bg: #fbfbfa; --fg: #1f2328; --muted: #6b737c; --line: #dfe2e5;
   --panel: #ffffff; --gutter: #f0f2f4;
-  --mark: rgba(255, 212, 0, 0.30); --ref: #80878f;
+  --mark: rgba(255, 212, 0, 0.30); --mark-on: rgba(255, 212, 0, 0.55); --ref: #80878f;
   --del: #a4504b; --ins: #3d7a50; --link: #0b5cad;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #14171a; --fg: #e3e6e9; --muted: #8f99a3; --line: #2f353b;
     --panel: #1b1f23; --gutter: #22272c;
-    --mark: rgba(255, 200, 0, 0.22); --ref: #9aa4ae;
+    --mark: rgba(255, 200, 0, 0.22); --mark-on: rgba(255, 200, 0, 0.42); --ref: #9aa4ae;
     --del: #d98a85; --ins: #7fbf92; --link: #6cb2ff;
   }
 }
@@ -1329,6 +1339,7 @@ pre { margin: 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, m
   border-right: 1px solid var(--line); user-select: none; }
 .source { flex: 1; min-width: 0; overflow-x: auto; padding: 8px 12px; white-space: pre; tab-size: 4; }
 mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0; }
+mark.on { background: var(--mark-on); }
 .ref { font-size: .7em; line-height: 0; vertical-align: sub; color: var(--ref);
   text-decoration: none; user-select: none; padding: 0 1px; }
 .cards { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin-top: 16px; }
@@ -1361,7 +1372,8 @@ ins { color: var(--ins); text-decoration: none; }
 "#;
 
 /// Added after [`STYLE`] on the rendered page: GitHub-like markdown in a
-/// readable column, with each block's comments under it, and its own colour
+/// readable column, with each block's comments under it (or, once the script
+/// has run on a wide screen, in a rail beside it), and its own colour
 /// variables and dark variant.
 const MARKDOWN_STYLE: &str = r#":root {
   --md-code: rgba(130, 140, 150, 0.22); --md-block: #f3f5f7; --md-zebra: #f6f8fa;
@@ -1424,9 +1436,86 @@ const MARKDOWN_STYLE: &str = r#":root {
 .markdown-body .footnote { font-size: .875em; color: var(--md-quote); }
 .markdown-body :target { background: var(--mark); }
 .markdown-body :is(h1, h2, h3, h4, h5, h6) .ref { font-size: 11px; }
+@media (min-width: 60rem) {
+  html.rail-on .rendered-view header, html.rail-on .rendered-view main { max-width: calc(67rem + 32px); }
+  html.rail-on .page { display: grid; grid-template-columns: minmax(0, 46fr) minmax(0, 19fr); column-gap: 2rem; }
+  html.rail-on .rail { position: relative; min-width: 0; }
+  html.rail-on .rail > .card { position: absolute; left: 0; right: 0; }
+}
+@media (max-width: 59.99rem) {
+  .page { display: block; }
+  .rail { display: none; }
+}
 @media (max-width: 40rem) {
   .markdown-body { font-size: 15px; }
   .markdown-body h1 { font-size: 1.7em; }
   .markdown-body th, .markdown-body td { padding: 4px 8px; }
 }
 "#;
+
+/// The one script on the rendered page. It is a fixed string with no document
+/// data in it, so it cannot carry anything the document says. It moves each card
+/// from under its block into the right-hand rail, level with its first mark, so
+/// the text stays continuous (cards inside the blocks would stretch the rows
+/// into gaps). Below 60rem it puts the cards back, and without script the static
+/// layout stands. It writes `data-*` measurements on placed cards for the
+/// browser test.
+const LAYOUT_SCRIPT: &str = r##"(function () {
+  var root = document.documentElement;
+  var rail = document.querySelector('.rail');
+  if (!rail || !window.matchMedia) return;
+  var wide = window.matchMedia('(min-width: 60rem)');
+  var items = Array.prototype.map.call(document.querySelectorAll('.margin > .card'), function (card) {
+    return { card: card, home: card.parentNode };
+  });
+  function anchorOf(it) {
+    return document.querySelector('mark[data-thread="' + it.card.id + '"]')
+      || document.querySelector('a.ref[href="#' + it.card.id + '"]')
+      || it.home.parentNode;
+  }
+  function glow(it, on) {
+    Array.prototype.forEach.call(document.querySelectorAll('mark[data-thread="' + it.card.id + '"]'), function (m) {
+      m.classList.toggle('on', on);
+    });
+  }
+  function restore() {
+    root.classList.remove('rail-on');
+    items.forEach(function (it) {
+      it.home.appendChild(it.card);
+      it.card.style.top = '';
+      ['data-placed', 'data-top', 'data-bottom', 'data-mark'].forEach(function (a) { it.card.removeAttribute(a); });
+    });
+    rail.style.minHeight = '';
+  }
+  function place() {
+    if (!wide.matches) { restore(); return; }
+    root.classList.add('rail-on');
+    items.forEach(function (it) { rail.appendChild(it.card); });
+    var base = rail.getBoundingClientRect().top;
+    var rows = items.map(function (it, i) {
+      return { it: it, i: i, mark: anchorOf(it).getBoundingClientRect().top - base };
+    });
+    rows.sort(function (a, b) { return a.mark - b.mark || a.i - b.i; });
+    var bottom = 0;
+    rows.forEach(function (r, n) {
+      var top = Math.max(r.mark, n ? bottom + 8 : 0);
+      var card = r.it.card;
+      card.style.top = top + 'px';
+      bottom = top + card.offsetHeight;
+      card.setAttribute('data-placed', 'rail');
+      card.setAttribute('data-top', Math.round(top));
+      card.setAttribute('data-bottom', Math.round(bottom));
+      card.setAttribute('data-mark', Math.round(r.mark));
+    });
+    rail.style.minHeight = bottom + 'px';
+  }
+  items.forEach(function (it) {
+    it.card.addEventListener('mouseenter', function () { glow(it, true); });
+    it.card.addEventListener('mouseleave', function () { glow(it, false); });
+  });
+  place();
+  window.addEventListener('load', place);
+  window.addEventListener('resize', place);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(place);
+})();
+"##;

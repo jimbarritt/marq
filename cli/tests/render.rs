@@ -118,6 +118,26 @@ fn rpage(markdown: &str, threads: &[T]) -> String {
     render_page(markdown, &values)
 }
 
+/// The rendered page without its one layout script, and the script's text.
+/// The page must hold exactly one `<script`, the layout script.
+fn split_script(html: &str) -> (String, String) {
+    assert_eq!(html.matches("<script").count(), 1, "one script element");
+    assert_eq!(html.matches("</script>").count(), 1, "one script end");
+    let open = "<script id=\"marq-layout\">";
+    let from = html.find(open).expect("the layout script");
+    let to = from + html[from..].find("</script>").unwrap() + "</script>".len();
+    let text = &html[from + open.len()..to - "</script>".len()];
+    (
+        format!("{}{}", &html[..from], &html[to..]),
+        text.to_string(),
+    )
+}
+
+/// The rendered page with the layout script cut out.
+fn no_script(html: &str) -> String {
+    split_script(html).0
+}
+
 fn unescape(text: &str) -> String {
     text.replace("&lt;", "<")
         .replace("&gt;", ">")
@@ -818,7 +838,7 @@ fn raw_html_in_the_document_is_shown_as_text() {
     assert!(doc.contains("&lt;div onclick=&quot;x()&quot;&gt;"));
     assert!(doc.contains("&lt;/pre&gt;&lt;script&gt;alert(1)&lt;/script&gt;"));
     assert!(doc.contains("&lt;b&gt;bold&lt;/b&gt;"));
-    assert!(!html.contains("<script"));
+    assert!(!no_script(&html).contains("<script"));
     assert!(!html.contains("onclick=\"x"));
 }
 
@@ -903,7 +923,7 @@ fn the_icon_loads_nothing_and_carries_no_style() {
 fn the_image_label_and_title_are_escaped() {
     let md = "![a\"><script>x</script>](u\"><b>.png)\n";
     let html = rpage(md, &[]);
-    assert!(!html.contains("<script"));
+    assert!(!no_script(&html).contains("<script"));
     assert!(!html.contains("<b>"));
     assert!(html.contains("aria-label=\"a&quot;&gt;&lt;script&gt;x&lt;/script&gt;\""));
     assert!(html.contains("(u&quot;&gt;&lt;b&gt;.png)\""));
@@ -963,7 +983,7 @@ fn the_rendered_page_loads_nothing_for_any_input() {
                    <style>body{background:url(//x.example/b.png)}</style>\n\n[a](javascript:alert(1))\n\n\
                    `<script>` and <script src=//x.example/s.js></script>\n";
     for (md, word) in [(hostile, "alert"), (TEST_MD, "Test")] {
-        let html = rpage(md, &[on(md, word)]);
+        let html = no_script(&rpage(md, &[on(md, word)]));
         // Text such as `src=` or `url(` may appear escaped inside the hostile
         // document's own words, so the strict list applies to the example
         // document, and the markup forms to both.
@@ -1042,7 +1062,7 @@ fn heading_ids_and_fragment_links_agree_and_cannot_collide_with_cards() {
 
 #[test]
 fn every_fragment_link_in_the_example_document_has_a_target() {
-    let html = rpage(TEST_MD, &[]);
+    let html = no_script(&rpage(TEST_MD, &[]));
     let all = ids(&html);
     let mut checked = 0;
     for part in html.split("href=\"#").skip(1) {
@@ -1217,7 +1237,7 @@ fn a_thread_at_many_offsets_of_the_example_document_does_not_panic() {
         .collect();
     let html = rpage(TEST_MD, &threads);
     assert!(html.contains("<mark"));
-    assert!(!html.contains("<script"));
+    assert!(!no_script(&html).contains("<script"));
 }
 
 #[test]
@@ -1566,30 +1586,186 @@ fn cards_have_no_coloured_state_classes_and_resolved_ones_are_dimmed() {
 }
 
 #[test]
-fn cards_stack_under_their_block_at_every_width() {
+fn the_static_page_stacks_cards_and_the_grid_needs_script_and_a_wide_screen() {
     let html = rpage("a\n", &[]);
     let style = &html[html.find("<style>").unwrap()..html.find("</style>").unwrap()];
-    // One column: no grid for the layout, no media query that moves cards.
-    assert!(!style.contains("grid-template-columns"));
-    assert!(!style.contains("19rem"));
-    assert!(!style.contains("min-width: 60rem"));
-    for query in style.split("@media").skip(1) {
-        let open = query.find('{').unwrap();
-        if query[..open].contains("prefers-color-scheme") {
-            continue;
-        }
-        let body = &query[open..query.find("\n}").unwrap_or(query.len())];
-        assert!(
-            !body.contains(".margin") && !body.contains(".blk"),
-            "{body}"
-        );
-    }
-    // A thin rule and a small indent, and no space when there are no cards.
+    // The grid exists only under `html.rail-on`, which the script sets, and
+    // only inside the wide media query.
+    assert_eq!(style.matches("grid-template-columns").count(), 1);
+    let wide_at = style.find("@media (min-width: 60rem)").expect("wide rule");
+    let grid_at = style.find("grid-template-columns").unwrap();
+    assert!(wide_at < grid_at);
+    let wide = &style[wide_at..];
+    let wide = &wide[..wide.find("\n}").unwrap()];
+    assert!(wide.contains("html.rail-on .page { display: grid;"));
+    assert!(wide.contains("html.rail-on .rail > .card { position: absolute;"));
+    assert!(!style[..wide_at].contains("rail-on"));
+    // The narrow rule stacks: one column, no rail.
+    let narrow_at = style
+        .find("@media (max-width: 59.99rem)")
+        .expect("narrow rule");
+    let narrow = &style[narrow_at..];
+    let narrow = &narrow[..narrow.find("\n}").unwrap()];
+    assert!(narrow.contains(".page { display: block; }"));
+    assert!(narrow.contains(".rail { display: none; }"));
+    // The stacked fallback keeps a thin rule and a small indent, and takes no
+    // space when there are no cards.
     assert!(style.contains(".margin { min-width: 0; display: flex; flex-direction: column;"));
     assert!(style.contains("padding-left: 12px; border-left: 1px solid var(--line); }"));
     assert!(style.contains(".margin:empty { display: none; }"));
-    // A single readable column.
+    // A single readable column without the rail.
     assert!(style.contains(".rendered-view main { max-width: 48rem; }"));
+    // Only the rail rules name the rail or the grid.
+    assert!(!style.contains("19rem"));
+    assert!(style.contains("minmax(0, 46fr) minmax(0, 19fr)"));
+}
+
+#[test]
+fn the_page_holds_the_document_and_an_empty_rail() {
+    let md = "para\n\nnext\n";
+    let html = rpage(md, &[thread_on(md, "para", "aaaaaaaa")]);
+    let page = html.find("<div class=\"page\">").expect("page");
+    let rendered = html.find("<div class=\"rendered\">").expect("rendered");
+    let rail = html.find("<aside class=\"rail\"").expect("rail");
+    assert!(page < rendered && rendered < rail);
+    assert!(html.contains("<aside class=\"rail\" aria-label=\"Comments\"></aside>"));
+    // The rail comes after every block, and the card is in its block's margin.
+    assert!(html.rfind("</aside></section>").unwrap() < rail);
+    assert!(block_rows(&html)[0].contains("id=\"t-1\""));
+    assert!(!html[rail..].contains("<article"));
+    assert_eq!(html.matches("<article").count(), 1);
+    // The source view has no rail and no script.
+    let source = page_of_source(md);
+    assert!(!source.contains("class=\"rail\"") && !source.contains("<script"));
+}
+
+fn page_of_source(md: &str) -> String {
+    page(md, &[thread_on(md, "para", "aaaaaaaa")])
+}
+
+#[test]
+fn every_card_is_in_its_blocks_margin_in_the_static_html() {
+    let md =
+        "# Title\n\nalpha beta\n\n| a | b |\n|---|---|\n| one | two |\n\n```\ncode here\n```\n";
+    let threads = [
+        thread_on(md, "alpha", "aaaaaaaa"),
+        thread_on(md, "beta", "bbbbbbbb"),
+        thread_on(md, "two", "cccccccc"),
+        thread_on(md, "code", "dddddddd"),
+    ];
+    let html = rpage(md, &threads);
+    let rows = block_rows(&html);
+    let cards: Vec<Vec<usize>> = rows
+        .iter()
+        .map(|row| {
+            (1..=4)
+                .filter(|n| row.contains(&format!("<article class=\"card\" id=\"t-{n}\"")))
+                .collect()
+        })
+        .collect();
+    assert_eq!(cards, vec![vec![], vec![1, 2], vec![3], vec![4]]);
+}
+
+// ---- the layout script ----
+
+#[test]
+fn the_rendered_page_has_exactly_one_layout_script() {
+    let md = "alpha beta\n";
+    let html = rpage(md, &[thread_on(md, "alpha", "aaaaaaaa")]);
+    let (rest, script) = split_script(&html);
+    assert!(!script.trim().is_empty());
+    assert!(!rest.contains("<script"));
+    // It sits after the document and the cards it moves.
+    assert!(html.find("<script id=\"marq-layout\">").unwrap() > html.rfind("</main>").unwrap() - 1);
+    // The source view is script-free.
+    let source = page(md, &[thread_on(md, "alpha", "aaaaaaaa")]);
+    assert!(!source.contains("<script"));
+}
+
+#[test]
+fn the_layout_script_does_not_depend_on_the_input() {
+    let md_a = "alpha beta\n";
+    let md_b =
+        "# Other\n\nA secret sentence with Zebra words.\n\n| x | y |\n|---|---|\n| 1 | 2 |\n";
+    let mut t = thread_on(md_b, "Zebra", "bbbbbbbb");
+    t.body = "ZEBRA-COMMENT <b>x</b>";
+    t.author = "Quentin-Author";
+    let one = split_script(&rpage(md_a, &[thread_on(md_a, "alpha", "aaaaaaaa")])).1;
+    let two = split_script(&rpage(md_b, &[t])).1;
+    let none = split_script(&rpage("", &[])).1;
+    assert_eq!(one, two);
+    assert_eq!(one, none);
+    for text in [
+        "alpha",
+        "beta",
+        "secret",
+        "Zebra",
+        "ZEBRA-COMMENT",
+        "Quentin",
+        "bbbbbbbb",
+        "aaaaaaaa",
+    ] {
+        assert!(!one.contains(text), "{text}");
+    }
+}
+
+#[test]
+fn the_layout_script_uses_no_dangerous_or_networked_feature() {
+    let script = split_script(&rpage("a\n", &[])).1;
+    for banned in [
+        "eval",
+        "Function(",
+        "innerHTML",
+        "outerHTML",
+        "document.write",
+        "fetch",
+        "XMLHttpRequest",
+        "import(",
+        "src=",
+        "url(",
+        "http",
+        "//",
+        "WebSocket",
+        "sendBeacon",
+        "location",
+        "cookie",
+        "localStorage",
+        "insertAdjacentHTML",
+        "setTimeout(\"",
+    ] {
+        assert!(!script.contains(banned), "{banned}");
+    }
+    // Small enough to read in one go.
+    assert!(
+        (40..=90).contains(&script.lines().count()),
+        "{}",
+        script.lines().count()
+    );
+    // It sets the class the style sheet keys on.
+    assert!(script.contains("classList.add('rail-on')"));
+    assert!(script.contains("(min-width: 60rem)"));
+}
+
+#[test]
+fn a_hostile_document_adds_no_second_script() {
+    let evil = "</script><script>alert(1)</script>";
+    let md = format!("{evil}\n\n[js](javascript:alert(1)) text\n");
+    let mut t = T::new("aaaaaaaa", anchored(0, evil.chars().count()));
+    t.body = evil;
+    t.author = evil;
+    t.quote = evil;
+    let mut o = T::new("bbbbbbbb", orphaned());
+    o.body = evil;
+    o.quote = evil;
+    o.replies = vec![reply("cccccccc", evil, evil, false)];
+    let html = rpage(&md, &[t, o]);
+    let (rest, script) = split_script(&html);
+    assert!(!rest.contains("<script"));
+    assert!(!rest.contains("</script"));
+    assert!(rest.contains("&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert!(!rest.to_lowercase().contains("href=\"javascript"));
+    assert!(!script.contains("alert"));
+    assert_eq!(script, split_script(&rpage("", &[])).1);
 }
 
 #[test]
