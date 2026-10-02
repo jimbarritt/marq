@@ -60,7 +60,7 @@ fn build_page(markdown: &str, threads: &[Value], mode: Mode) -> String {
 
     let mut placed: Vec<&View> = views.iter().filter(|v| v.range.is_some()).collect();
     // Cards follow the order of the text they point at, then creation time, so
-    // the sidebar reads top to bottom like the source.
+    // the list reads top to bottom like the source.
     placed.sort_by(|a, b| {
         (a.range, a.created.as_str(), a.index).cmp(&(b.range, b.created.as_str(), b.index))
     });
@@ -132,8 +132,8 @@ fn build_page(markdown: &str, threads: &[Value], mode: Mode) -> String {
                 out.push_str("<p class=\"none\">No comments on the current text</p>\n");
             }
             let doc = write_rendered(markdown, &chars, &placed);
-            // Each card goes in the margin of the block that holds its first
-            // mark. `placed` is already in position then creation order.
+            // Each card goes in the margin (the strip under the block) of the
+            // block that holds its first mark. `placed` is already in position then creation order.
             let mut margins: Vec<Vec<&View>> = vec![Vec::new(); doc.blocks.len()];
             let mut loose: Vec<&View> = Vec::new();
             for view in &placed {
@@ -153,7 +153,7 @@ fn build_page(markdown: &str, threads: &[Value], mode: Mode) -> String {
                     &doc.marked,
                 );
             }
-            // A thread with a range but no block to sit beside (an empty
+            // A thread with a range but no block to sit under (an empty
             // document) still gets its card.
             if !loose.is_empty() {
                 write_row(&mut out, "", "", &loose, markdown, &doc.marked);
@@ -180,8 +180,8 @@ fn build_page(markdown: &str, threads: &[Value], mode: Mode) -> String {
     out
 }
 
-/// One row of the rendered page: a block of the document and, beside it (or
-/// under it on a narrow screen), the cards of the threads that start in it.
+/// One row of the rendered page: a block of the document and, directly under
+/// it in the same column, the cards of the threads that start in it.
 fn write_row(
     out: &mut String,
     class: &str,
@@ -581,8 +581,8 @@ struct Block {
 
 struct Rendered {
     blocks: Vec<Block>,
-    /// The block each thread's card belongs beside, by thread index. A thread
-    /// with no block to sit beside is absent.
+    /// The block each thread's card belongs under, by thread index. A thread
+    /// with no block to sit under is absent.
     owner: HashMap<usize, usize>,
     /// The threads that got at least one mark.
     marked: HashSet<usize>,
@@ -602,6 +602,10 @@ struct Rendered {
 /// whose `>` prefixes were dropped): the whole event is marked when any range
 /// touches it. Syntax the renderer drops (`#`, `---`, link destinations, table
 /// rules) has no text to mark, so a range over only such syntax marks nothing.
+///
+/// An image is the one exception to both rules. It is drawn as a camera icon
+/// with no text, so there is no text to cut: a range that overlaps any part of
+/// `![alt](src)` marks the whole icon, so a card is never left without a mark.
 fn write_rendered(markdown: &str, chars: &[char], placed: &[&View]) -> Rendered {
     let mut offsets: Vec<usize> = markdown.char_indices().map(|(i, _)| i).collect();
     offsets.push(markdown.len());
@@ -692,8 +696,18 @@ impl Doc<'_> {
         let mut aligns: Vec<Alignment> = Vec::new();
         let mut in_head = false;
         let mut column = 0;
+        let mut skip_to = 0;
 
         for (i, (event, range)) in events.iter().enumerate() {
+            if i < skip_to {
+                continue;
+            }
+            if let Event::Start(Tag::Image { dest_url, .. }) = event {
+                let (end, alt) = image_alt(events, i);
+                skip_to = end + 1;
+                self.image(dest_url, &alt, range);
+                continue;
+            }
             match event {
                 Event::Start(tag) if starts_block(tag) => {
                     if self.depth == 0 {
@@ -791,17 +805,6 @@ impl Doc<'_> {
                         title,
                         ..
                     } => links.push(self.open_link(*link_type, dest_url, title)),
-                    Tag::Image {
-                        dest_url, title, ..
-                    } => {
-                        // Never an `<img>`: the page must load nothing. The box
-                        // shows the alt text; the source is in the tooltip.
-                        let mut tip = format!("image: {dest_url}");
-                        if !title.is_empty() {
-                            let _ = write!(tip, " ({title})");
-                        }
-                        let _ = write!(self.out, "<span class=\"img\" title=\"{}\">", esc(&tip));
-                    }
                     _ => {}
                 },
                 Event::End(tag) => match tag {
@@ -829,7 +832,6 @@ impl Doc<'_> {
                     TagEnd::Strong => self.out.push_str("</strong>"),
                     TagEnd::Strikethrough => self.out.push_str("</s>"),
                     TagEnd::Link => self.out.push_str(links.pop().unwrap_or("</span>")),
-                    TagEnd::Image => self.out.push_str("</span>"),
                     _ => {}
                 },
                 // A bare line break is the one piece of inline HTML that is safe to
@@ -983,7 +985,7 @@ impl Doc<'_> {
 
     /// Puts each thread's number after its last marked piece (or at its
     /// recorded position when it has no marks) and settles which block each
-    /// card belongs beside.
+    /// card belongs under.
     fn assemble(mut self) -> Rendered {
         let mut inserts: Vec<Vec<(usize, usize, bool)>> = vec![Vec::new(); self.blocks.len()];
         let mut owner = HashMap::new();
@@ -1029,6 +1031,27 @@ impl Doc<'_> {
             owner,
             marked: self.marked,
         }
+    }
+
+    /// An image: one grey camera icon and nothing else. Never an `<img>`, so
+    /// the page loads nothing. The alt text and source are on the wrapper as
+    /// the accessible name and the tooltip, not as visible text. Every range
+    /// that overlaps the image's source marks the icon as a whole.
+    fn image(&mut self, src: &str, alt: &str, range: &Range<usize>) {
+        self.record_positions(range.end.saturating_sub(1).max(range.start));
+        let label = if alt.trim().is_empty() { "image" } else { alt };
+        let html = format!(
+            "<span class=\"img\" role=\"img\" aria-label=\"{}\" title=\"{}\">{CAMERA}</span>",
+            esc(label),
+            esc(&format!("{label} ({src})")),
+        );
+        let covering: Vec<usize> = (0..self.spans.len())
+            .filter(|&i| {
+                let s = &self.spans[i];
+                s.start < range.end && s.end > range.start && s.end > s.start
+            })
+            .collect();
+        self.marked_html(&html, &covering);
     }
 
     /// A piece of rendered text with no source text of its own to mark.
@@ -1114,12 +1137,18 @@ impl Doc<'_> {
     }
 
     fn marked_run(&mut self, text: &str, covering: &[usize]) {
+        self.marked_html(&esc(text), covering);
+    }
+
+    /// `html` is already safe to emit; it is wrapped in one `<mark>` per
+    /// covering range.
+    fn marked_html(&mut self, html: &str, covering: &[usize]) {
         for &i in covering {
             self.out.push_str(&self.spans[i].open);
             self.marked.insert(self.spans[i].index);
             self.first_block[i].get_or_insert(self.blocks.len());
         }
-        self.out.push_str(&esc(text));
+        self.out.push_str(html);
         for _ in covering {
             self.out.push_str("</mark>");
         }
@@ -1128,6 +1157,38 @@ impl Doc<'_> {
             self.last_piece[i] = Some(at);
         }
     }
+}
+
+/// The camera icon that stands for an image. Stroke only, in `currentColor`, so
+/// the grey comes from the wrapper's `color`. It holds no `<image>`, link or
+/// style, so it loads nothing.
+const CAMERA: &str = "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" \
+stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" \
+aria-hidden=\"true\" focusable=\"false\"><path d=\"M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z\"/>\
+<circle cx=\"12\" cy=\"13.5\" r=\"3.5\"/></svg>";
+
+/// The index of the event that closes the image opened at `start`, and the
+/// plain text inside it (its alt text).
+fn image_alt(events: &[(Event, Range<usize>)], start: usize) -> (usize, String) {
+    let mut depth = 0;
+    let mut alt = String::new();
+    for (i, (event, _)) in events.iter().enumerate().skip(start) {
+        match event {
+            Event::Start(Tag::Image { .. }) => depth += 1,
+            Event::End(TagEnd::Image) => {
+                depth -= 1;
+                if depth == 0 {
+                    return (i, alt);
+                }
+            }
+            Event::Text(t) | Event::Code(t) | Event::InlineHtml(t) | Event::Html(t) => {
+                alt.push_str(t)
+            }
+            Event::SoftBreak | Event::HardBreak => alt.push(' '),
+            _ => {}
+        }
+    }
+    (events.len().saturating_sub(1), alt)
 }
 
 /// The id of each heading, in document order, GitHub style: lower case, spaces
@@ -1257,12 +1318,11 @@ const STYLE: &str = r#":root {
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-header, main { max-width: 90rem; margin: 0 auto; padding: 0 16px; }
+header, main { max-width: 60rem; margin: 0 auto; padding: 0 16px; }
 header h1 { font-size: 1.1rem; margin: 16px 0 4px; }
 .orphans h2 { font-size: 1.05rem; margin: 24px 0 8px; }
 .summary { margin: 0 0 16px; color: var(--muted); }
-.layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
-@media (max-width: 60rem) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.layout { min-width: 0; }
 .source-box { display: flex; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: hidden; }
 pre { margin: 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .gutter { padding: 8px 8px; text-align: right; color: var(--muted); background: var(--gutter);
@@ -1271,7 +1331,7 @@ pre { margin: 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, m
 mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0; }
 .ref { font-size: .7em; line-height: 0; vertical-align: sub; color: var(--ref);
   text-decoration: none; user-select: none; padding: 0 1px; }
-.cards { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cards { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin-top: 16px; }
 .card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
   padding: 8px 10px; min-width: 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .card.dim { opacity: .6; }
@@ -1297,23 +1357,23 @@ ins { color: var(--ins); text-decoration: none; }
 .replies { margin-top: 8px; border-left: 1px solid var(--line); padding-left: 10px; }
 .reply { margin-top: 6px; }
 .none { color: var(--muted); }
-.orphans .card { margin-bottom: 8px; max-width: 30rem; }
+.orphans .card { margin-bottom: 8px; }
 "#;
 
 /// Added after [`STYLE`] on the rendered page: GitHub-like markdown in a
-/// readable column, with the comment margin beside it, and its own colour
+/// readable column, with each block's comments under it, and its own colour
 /// variables and dark variant.
 const MARKDOWN_STYLE: &str = r#":root {
   --md-code: rgba(130, 140, 150, 0.22); --md-block: #f3f5f7; --md-zebra: #f6f8fa;
-  --md-rule: #d1d9e0; --md-quote: #59636e;
+  --md-rule: #d1d9e0; --md-quote: #59636e; --img: #98a0a8;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --md-code: rgba(150, 160, 170, 0.25); --md-block: #1f2429; --md-zebra: #1d2227;
-    --md-rule: #3d444d; --md-quote: #9aa4ae;
+    --md-rule: #3d444d; --md-quote: #9aa4ae; --img: #6f7882;
   }
 }
-.rendered-view header, .rendered-view main { max-width: 69rem; }
+.rendered-view header, .rendered-view main { max-width: 48rem; }
 .rendered { margin-top: 8px; }
 .blk { margin-bottom: 16px; }
 .blk.head { margin-top: 24px; }
@@ -1323,10 +1383,6 @@ const MARKDOWN_STYLE: &str = r#":root {
 .margin { min-width: 0; display: flex; flex-direction: column; gap: 8px;
   margin: 8px 0 0 8px; padding-left: 12px; border-left: 1px solid var(--line); }
 .margin:empty { display: none; }
-@media (min-width: 60rem) {
-  .blk { display: grid; grid-template-columns: minmax(0, 46rem) 19rem; column-gap: 2rem; align-items: start; }
-  .margin { margin: 0; padding-left: 0; border-left: 0; }
-}
 .markdown-body { font: 16px/1.6 -apple-system, BlinkMacSystemFont,
   "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; overflow-wrap: break-word; }
 .markdown-body > :is(p, ul, ol, blockquote, pre, div, hr, h1, h2, h3, h4, h5, h6) { margin: 0; }
@@ -1363,9 +1419,8 @@ const MARKDOWN_STYLE: &str = r#":root {
 .markdown-body tbody tr:nth-child(even) { background: var(--md-zebra); }
 .markdown-body .a-center { text-align: center; }
 .markdown-body .a-right { text-align: right; }
-.markdown-body .img { display: inline-block; padding: 0 .5em; border: 1px dashed var(--md-rule);
-  border-radius: 6px; background: var(--md-code); color: var(--muted); font-size: .9em; }
-.markdown-body .img::before { content: "\1F5BC\FE0E\A0"; }
+.markdown-body .img { color: var(--img); }
+.markdown-body .img svg { width: 1.1em; height: 1.1em; vertical-align: -.15em; }
 .markdown-body .footnote { font-size: .875em; color: var(--md-quote); }
 .markdown-body :target { background: var(--mark); }
 .markdown-body :is(h1, h2, h3, h4, h5, h6) .ref { font-size: 11px; }
