@@ -153,7 +153,7 @@ fn marked_text_in(source: &str, thread: usize) -> String {
                 stack.push(tag.contains(&want));
             } else if tag == "</mark>" {
                 stack.pop();
-            } else if tag.starts_with("<a ") {
+            } else if tag.starts_with("<a class=\"ref\"") {
                 // A link marker: its digits are not source text.
                 let close = rest.find("</a>").expect("link end");
                 rest = &rest[close + 4..];
@@ -176,7 +176,9 @@ fn a_mark_covers_exactly_its_characters() {
     let text = "alpha beta gamma\n";
     let html = page(text, &[T::new("aaaaaaaa", anchored(6, 10))]);
     assert_eq!(marked_text(&html, 1), "beta");
-    assert!(source_html(&html).contains("alpha <a class=\"ref\""));
+    // The number follows the marked text, outside the mark.
+    assert!(source_html(&html).contains("alpha <mark"));
+    assert!(source_html(&html).contains("beta</mark><a class=\"ref\" href=\"#t-1\">1</a> gamma"));
 }
 
 #[test]
@@ -235,7 +237,7 @@ fn input_is_escaped_in_source_authors_bodies_and_quotes() {
     o.quote = "<u>quote</u>";
     o.body = "<img src=x onerror=alert(1)>";
     let html = page(text, &[t, o]);
-    assert!(source_html(&html).contains("a <a class=\"ref\""));
+    assert!(source_html(&html).contains("</mark><a class=\"ref\""));
     assert!(html.contains("&lt;b&gt;"));
     assert!(html.contains(" &amp; &quot;c&quot; &#39;d&#39;"));
     assert!(html.contains("&lt;i&gt;Eve&lt;/i&gt; &amp; &quot;co&quot;"));
@@ -324,7 +326,7 @@ fn an_out_of_range_anchor_is_clamped_not_a_panic() {
 }
 
 #[test]
-fn marks_are_coloured_by_state() {
+fn every_mark_looks_the_same_whatever_the_state() {
     let states = ["open", "resolved", "accepted", "rejected"];
     let threads: Vec<T> = states
         .iter()
@@ -337,24 +339,26 @@ fn marks_are_coloured_by_state() {
         .collect();
     let html = page("abcd\n", &threads);
     for (i, state) in states.iter().enumerate() {
+        // The state stays on the mark as data, with no class to style it by.
         assert!(
             html.contains(&format!(
-                "<mark class=\"s-{state} anchored\" data-thread=\"t-{}\"",
+                "<mark data-thread=\"t-{}\" data-state=\"{state}\" data-status=\"anchored\"",
                 i + 1
             )),
             "{state}"
         );
     }
+    assert!(!html.contains("<mark class"));
 }
 
 #[test]
-fn a_changed_mark_differs_and_its_card_shows_the_original() {
+fn a_changed_mark_looks_the_same_and_its_card_shows_the_original() {
     let mut t = T::new("aaaaaaaa", changed(0, 3, "the \"old\" <text>"));
     t.quote = "ignored when original is present";
     let html = page("now it is\n", &[t]);
-    assert!(html.contains("<mark class=\"s-open changed\""));
+    assert!(html.contains("<mark data-thread=\"t-1\" data-state=\"open\" data-status=\"changed\""));
     assert!(html.contains("was <q>the &quot;old&quot; &lt;text&gt;</q>"));
-    assert!(html.contains("mark.changed"));
+    assert!(html.contains("<span class=\"flag\">changed</span>"));
     assert_eq!(marked_text(&html, 1), "now");
 }
 
@@ -365,14 +369,16 @@ fn an_anchored_card_has_no_was_line() {
 }
 
 #[test]
-fn cards_show_id_state_kind_author_time_and_line_column() {
+fn cards_show_number_id_state_author_time_and_line_column() {
     let text = "first\nsecond line\n";
     let mut t = T::new("4f0c2d1e", anchored(9, 13));
     t.state = "resolved";
     let html = page(text, &[t]);
     assert!(html.contains("<code class=\"id\">4f0c2d1e</code>"));
-    assert!(html.contains("<span class=\"state s-resolved\">resolved</span>"));
-    assert!(html.contains("<span class=\"kind\">comment</span>"));
+    assert!(html.contains("<span class=\"num\">1</span>"));
+    assert!(html.contains("<span class=\"state\">resolved</span>"));
+    // A plain open comment carries no label: absence means open.
+    assert!(!page(text, &[T::new("aaaaaaaa", anchored(0, 2))]).contains("class=\"state\""));
     assert!(html.contains("<span class=\"author\">Jim</span>"));
     assert!(html.contains("<time>2026-09-29T10:15:02Z</time>"));
     assert!(html.contains("<span class=\"loc\">2:4</span>"));
@@ -544,7 +550,8 @@ fn a_hostile_state_does_not_reach_a_class_attribute() {
     assert!(!html.contains("onmouseover=\"alert"));
 }
 
-/// Writes a realistic source-view page to `target/render-sample-source.html`.
+/// Writes the source view of `example-docs/test.md`, with threads of mixed state
+/// and status, to `target/render-sample-source.html`.
 /// The rendered view's sample is written by `writes_a_rendered_sample_page`.
 #[test]
 fn writes_a_sample_page() {
@@ -574,27 +581,52 @@ fn on(text: &str, needle: &str) -> T {
     T::new("aaaaaaaa", anchored(s, e))
 }
 
-/// The document pane of the rendered view.
-fn doc_html(html: &str) -> &str {
-    let open = "<article class=\"markdown-body\">";
-    let from = html.find(open).expect("document article") + open.len();
-    let to = from + html[from..].find("</article>").expect("closing article");
-    &html[from..to]
+/// The document half of the rendered view: every block's document column, with
+/// the margins that hold the cards cut out.
+fn doc_html(html: &str) -> String {
+    let from = html
+        .find("<div class=\"rendered\">")
+        .expect("rendered document");
+    let to = html[from..]
+        .find("<section class=\"orphans\">")
+        .or_else(|| html[from..].find("</main>"))
+        .expect("end of document")
+        + from;
+    let mut rest = &html[from..to];
+    let mut out = String::new();
+    while let Some(open) = rest.find("<aside class=\"margin\">") {
+        out.push_str(&rest[..open]);
+        let close = rest[open..].find("</aside>").expect("margin end");
+        rest = &rest[open + close + "</aside>".len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The `section.blk` rows of the rendered view, each as its whole HTML.
+fn block_rows(html: &str) -> Vec<&str> {
+    let from = html
+        .find("<div class=\"rendered\">")
+        .expect("rendered document");
+    html[from..]
+        .split("<section class=\"blk")
+        .skip(1)
+        .map(|row| &row[..row.find("</aside></section>").expect("row end")])
+        .collect()
 }
 
 /// What the single thread on `needle` marks in the rendered view.
 fn marks(text: &str, needle: &str) -> String {
     let html = rpage(text, &[on(text, needle)]);
-    marked_text_in(doc_html(&html), 1)
+    marked_text_in(&doc_html(&html), 1)
 }
 
 #[test]
 fn a_mark_covers_exactly_its_characters_in_a_paragraph() {
     assert_eq!(marks("Hello brave new world\n", "brave new"), "brave new");
     let html = rpage("Hello brave world\n", &[on("Hello brave world\n", "brave")]);
-    assert!(html
-        .contains("<p>Hello <a class=\"ref\" href=\"#t-1\">1</a><mark class=\"s-open anchored\""));
-    assert!(html.contains(">brave</mark> world</p>"));
+    assert!(html.contains("<p>Hello <mark data-thread=\"t-1\" data-state=\"open\""));
+    assert!(html.contains(">brave</mark><a class=\"ref\" href=\"#t-1\">1</a> world</p>"));
 }
 
 #[test]
@@ -655,7 +687,7 @@ fn a_range_across_bold_and_plain_text_is_split_but_covers_all_of_it() {
     let (s, _) = at(md, "start");
     let (_, e) = at(md, "tail");
     let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
-    assert_eq!(marked_text_in(doc_html(&html), 1), "start bold tail");
+    assert_eq!(marked_text_in(&doc_html(&html), 1), "start bold tail");
     // One mark per rendered text piece: "start ", "bold" and " tail".
     assert_eq!(html.matches("data-thread=\"t-1\"").count(), 3);
     // One reference number for the thread, not one per piece.
@@ -669,7 +701,7 @@ fn a_range_across_a_soft_line_break_and_two_paragraphs_is_marked() {
     let (s, _) = at(md, "para");
     let (_, e) = at(md, "second");
     let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
-    assert_eq!(marked_text_in(doc_html(&html), 1), "parasecond");
+    assert_eq!(marked_text_in(&doc_html(&html), 1), "parasecond");
 }
 
 #[test]
@@ -687,8 +719,8 @@ fn overlapping_and_adjacent_ranges_are_marked_by_thread() {
         ],
     );
     let doc = doc_html(&html);
-    assert_eq!(marked_text_in(doc, 1), "alpha beta");
-    assert_eq!(marked_text_in(doc, 2), "beta gamma");
+    assert_eq!(marked_text_in(&doc, 1), "alpha beta");
+    assert_eq!(marked_text_in(&doc, 2), "beta gamma");
     // The shared word sits inside both marks, outermost first.
     assert!(doc.contains("title=\"bbbbbbbb open (anchored)\">beta</mark></mark>"));
 
@@ -701,9 +733,11 @@ fn overlapping_and_adjacent_ranges_are_marked_by_thread() {
         ],
     );
     let doc = doc_html(&html);
-    assert_eq!(marked_text_in(doc, 1), "abc");
-    assert_eq!(marked_text_in(doc, 2), "def");
-    assert!(doc.contains("abc</mark><a class=\"ref\" href=\"#t-2\">2</a><mark"));
+    assert_eq!(marked_text_in(&doc, 1), "abc");
+    assert_eq!(marked_text_in(&doc, 2), "def");
+    // Each number follows its own thread's last piece, outside the marks.
+    assert!(doc.contains("abc</mark><a class=\"ref\" href=\"#t-1\">1</a><mark"));
+    assert!(doc.contains("def</mark><a class=\"ref\" href=\"#t-2\">2</a>"));
 }
 
 #[test]
@@ -737,7 +771,7 @@ fn a_range_over_escaped_text_marks_at_least_the_escaped_text() {
 fn a_range_over_syntax_the_renderer_drops_gets_a_flagged_card_and_a_number() {
     let md = "# Title\n\nPara\n";
     let html = rpage(md, &[T::new("aaaaaaaa", anchored(0, 1))]);
-    assert_eq!(marked_text_in(doc_html(&html), 1), "");
+    assert_eq!(marked_text_in(&doc_html(&html), 1), "");
     assert!(!doc_html(&html).contains("<mark"));
     // The number sits at the next rendered text, in the heading.
     assert!(doc_html(&html)
@@ -777,7 +811,7 @@ fn raw_html_in_the_document_is_shown_as_text() {
     let md = "<div onclick=\"x()\">hi</div>\n\ninline <b>bold</b> and </pre><script>alert(1)</script>\n\n<script>\nalert(2)\n</script>\n";
     let html = rpage(md, &[]);
     let doc = doc_html(&html);
-    assert!(!doc.contains("<div"));
+    assert!(!doc.contains("<div onclick"));
     assert!(!doc.contains("<b>"));
     assert!(!doc.contains("<script"));
     assert!(!doc.contains("</pre><script"));
@@ -829,7 +863,7 @@ fn an_image_is_a_box_with_its_alt_text_and_loads_nothing() {
     assert!(doc.contains(
         "<span class=\"img\" title=\"image: https://tracker.example/p.png (a title)\">alt <em>"
     ));
-    assert_eq!(marked_text_in(doc, 1), "text");
+    assert_eq!(marked_text_in(&doc, 1), "text");
 }
 
 #[test]
@@ -954,7 +988,7 @@ fn task_lists_show_disabled_checkboxes() {
     assert!(doc.contains("<li class=\"task\"><input type=\"checkbox\" disabled checked> done</li>"));
     assert!(doc.contains("<input type=\"checkbox\" disabled> "));
     assert!(doc.contains("<li>plain</li>"));
-    assert_eq!(marked_text_in(doc, 1), "todo");
+    assert_eq!(marked_text_in(&doc, 1), "todo");
 }
 
 #[test]
@@ -1009,7 +1043,7 @@ fn the_rendered_page_keeps_the_cards_orphans_applied_and_summary() {
         &[open, resolved, accepted, rejected, moved, lost, deleted],
     );
     assert!(html.contains("7 threads: 4 anchored, 1 changed, 1 orphaned, 1 applied"));
-    assert!(html.contains("<aside class=\"cards\""));
+    assert!(html.contains("<aside class=\"margin\">"));
     assert!(html.contains("<h2>Orphaned comments</h2>"));
     assert!(html.contains("<h2>Applied deletions</h2>"));
     assert!(html.contains("A line that went."));
@@ -1017,27 +1051,28 @@ fn the_rendered_page_keeps_the_cards_orphans_applied_and_summary() {
     assert!(html.contains("<del>here</del>"));
     assert!(html.contains("<ins>there</ins>"));
     assert!(html.contains("(agent)"));
-    for class in [
-        "s-open anchored",
-        "s-resolved anchored",
-        "s-accepted anchored",
-        "s-rejected anchored",
-        "s-open changed",
+    for (state, status) in [
+        ("open", "anchored"),
+        ("resolved", "anchored"),
+        ("accepted", "anchored"),
+        ("rejected", "anchored"),
+        ("open", "changed"),
     ] {
         assert!(
-            html.contains(&format!("<mark class=\"{class}\"")),
-            "{class}"
+            html.contains(&format!(
+                " data-state=\"{state}\" data-status=\"{status}\" title="
+            )),
+            "{state} {status}"
         );
     }
     for n in 1..=5 {
         assert!(html.contains(&format!("<a class=\"ref\" href=\"#t-{n}\">{n}</a>")));
-        assert!(html.contains("<article class=\"card s-"));
         assert!(html.contains(&format!("id=\"t-{n}\"")));
     }
+    assert!(html.contains("<article class=\"card\""));
     // No line-number gutter in the rendered view, and no source pre.
     assert!(!html.contains("class=\"gutter\""));
     assert!(!html.contains("<pre class=\"source\">"));
-    assert!(html.contains("@media (max-width: 60rem)"));
     assert!(html.contains("prefers-color-scheme: dark"));
 }
 
@@ -1050,11 +1085,11 @@ fn the_rendered_page_handles_no_threads_and_no_text() {
     assert!(!html.contains("<mark"));
     assert!(!html.contains("<article class=\"card"));
     let html = rpage("", &[]);
-    assert!(html.contains("<article class=\"markdown-body\">\n</article>"));
+    assert!(html.contains("<div class=\"rendered\">\n</div>"));
     // A range past the end is clamped, not a panic.
     let html = rpage("abc\n", &[T::new("aaaaaaaa", anchored(2, 999))]);
     // The final newline is not rendered text, so only the `c` is marked.
-    assert_eq!(marked_text_in(doc_html(&html), 1), "c");
+    assert_eq!(marked_text_in(&doc_html(&html), 1), "c");
 }
 
 #[test]
@@ -1069,10 +1104,10 @@ fn the_example_document_renders_with_threads_in_each_kind_of_block() {
         .collect();
     let html = rpage(TEST_MD, &threads);
     let doc = doc_html(&html);
-    assert_eq!(marked_text_in(doc, 1), "Test");
-    assert_eq!(marked_text_in(doc, 2), "Avast ye scurvy dogs");
-    assert_eq!(marked_text_in(doc, 3), "fibonacci(n - 1)");
-    assert_eq!(marked_text_in(doc, 4), "Another nested");
+    assert_eq!(marked_text_in(&doc, 1), "Test");
+    assert_eq!(marked_text_in(&doc, 2), "Avast ye scurvy dogs");
+    assert_eq!(marked_text_in(&doc, 3), "fibonacci(n - 1)");
+    assert_eq!(marked_text_in(&doc, 4), "Another nested");
     assert!(doc.contains("<table>"));
     assert!(doc.contains("<pre><code class=\"language-mermaid\">"));
     assert!(doc.contains("<input type=\"checkbox\" disabled checked>"));
@@ -1149,14 +1184,10 @@ fn sample_html(render: fn(&str, &[Value]) -> String) -> String {
     moved.quote = "fib(n - 1)";
     moved.body = "The function was renamed.";
 
-    let (s, e) = at(text, "✨");
-    let mut emoji = T::new("8e9fa0b2", anchored(s, e));
-    emoji.body = "After non-ASCII text, bytes and code points differ.";
-
-    let rule = text.find("\n---\n").unwrap() + 1;
-    let (s, e) = at(text, &text[rule..rule + 3]);
-    let mut hr = T::new("8e9fa0b3", anchored(s, e));
-    hr.body = "A rule has no rendered text.";
+    let mut title = on(text, "Test");
+    title.id = "8e9fa0b2";
+    title.quote = "Test";
+    title.body = "Is \"Test\" the right word for a title?";
 
     let mut lost = T::new("9fa0b1c2", orphaned());
     lost.quote = "A sentence that was deleted.";
@@ -1170,7 +1201,7 @@ fn sample_html(render: fn(&str, &[Value]) -> String) -> String {
     deleted.body = "Cut it.";
 
     let values: Vec<Value> = [
-        open, resolved, accepted, rejected, overlap_a, overlap_b, moved, emoji, hr, lost, deleted,
+        title, open, resolved, accepted, rejected, overlap_a, overlap_b, moved, lost, deleted,
     ]
     .iter()
     .map(T::json)
@@ -1193,6 +1224,279 @@ fn writes_a_rendered_sample_page() {
     let html = sample_html(render_page);
     assert!(html.contains("<table>"));
     write_sample("render-sample.html", &html);
+}
+
+// ---- cards beside their text, numbers after it, one quiet look ----
+
+fn thread_on(md: &str, needle: &str, id: &'static str) -> T {
+    let (s, e) = at(md, needle);
+    T::new(id, anchored(s, e))
+}
+
+#[test]
+fn a_card_sits_in_the_same_row_as_its_mark() {
+    let md = "first para\n\nmiddle para\n\nlast para\n";
+    let html = rpage(
+        md,
+        &[
+            thread_on(md, "first", "aaaaaaaa"),
+            thread_on(md, "last", "bbbbbbbb"),
+        ],
+    );
+    let rows = block_rows(&html);
+    assert_eq!(rows.len(), 3);
+    assert!(rows[0].contains("data-thread=\"t-1\"") && rows[0].contains("id=\"t-1\""));
+    assert!(!rows[0].contains("t-2"));
+    assert!(!rows[1].contains("<article") && !rows[1].contains("<mark"));
+    assert!(rows[2].contains("data-thread=\"t-2\"") && rows[2].contains("id=\"t-2\""));
+    assert!(!rows[2].contains("t-1"));
+    // The card is in the margin, not the document column.
+    let (doc, margin) = rows[0].split_once("<aside class=\"margin\">").unwrap();
+    assert!(doc.contains("<mark") && !doc.contains("<article"));
+    assert!(margin.contains("<article class=\"card\" id=\"t-1\""));
+}
+
+#[test]
+fn a_block_without_threads_has_an_empty_margin() {
+    let md = "one\n\ntwo\n";
+    let html = rpage(md, &[thread_on(md, "one", "aaaaaaaa")]);
+    assert!(html.contains("<aside class=\"margin\"></aside></section>"));
+}
+
+#[test]
+fn a_card_goes_in_the_row_of_a_table_a_code_block_and_a_list() {
+    let md =
+        "para\n\n| a | b |\n|---|---|\n| left | right |\n\n```\nlet x = 1;\n```\n\n- one\n- two\n";
+    let html = rpage(
+        md,
+        &[
+            thread_on(md, "right", "aaaaaaaa"),
+            thread_on(md, "x = 1", "bbbbbbbb"),
+            thread_on(md, "two", "cccccccc"),
+        ],
+    );
+    let rows = block_rows(&html);
+    assert_eq!(rows.len(), 4);
+    assert!(rows[1].contains("<table>") && rows[1].contains("id=\"t-1\""));
+    assert!(rows[2].contains("<pre><code>") && rows[2].contains("id=\"t-2\""));
+    assert!(rows[3].contains("<ul>") && rows[3].contains("id=\"t-3\""));
+}
+
+#[test]
+fn cards_in_one_row_follow_the_text_then_creation_time() {
+    let md = "alpha beta gamma\n";
+    // Thread 1 is later in the text than thread 2.
+    let mut late = thread_on(md, "gamma", "aaaaaaaa");
+    late.body = "Late in the text.";
+    let mut early = thread_on(md, "alpha", "bbbbbbbb");
+    early.body = "Early in the text.";
+    let html = rpage(md, &[late, early]);
+    let early_at = html.find("Early in the text.").unwrap();
+    let late_at = html.find("Late in the text.").unwrap();
+    assert!(early_at < late_at);
+    assert_eq!(block_rows(&html).len(), 1);
+}
+
+#[test]
+fn a_thread_with_no_rendered_text_sits_in_the_block_at_its_number() {
+    let md = "para one\n\n---\n\npara two\n";
+    let (s, e) = at(md, "---");
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
+    let rows = block_rows(&html);
+    assert_eq!(rows.len(), 3);
+    assert!(rows[1].contains("<a class=\"ref\" href=\"#t-1\">1</a><hr>"));
+    assert!(rows[1].contains("id=\"t-1\"") && rows[1].contains("no rendered text"));
+    assert!(!rows[0].contains("t-1") && !rows[2].contains("t-1"));
+
+    // A range over a heading's `#` has its number at the heading's text.
+    let md = "para\n\n## Heading\n";
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(6, 8))]);
+    let rows = block_rows(&html);
+    assert!(rows[1].contains("<h2 id=\"md-heading\"><a class=\"ref\""));
+    assert!(rows[1].contains("id=\"t-1\""));
+}
+
+#[test]
+fn a_thread_marked_across_blocks_has_its_card_with_the_first_and_its_number_after_the_last() {
+    let md = "first para\n\nsecond para\n";
+    let (s, _) = at(md, "para");
+    let (_, e) = at(md, "second");
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
+    let rows = block_rows(&html);
+    assert!(rows[0].contains("id=\"t-1\""));
+    assert!(!rows[0].contains("class=\"ref\""));
+    assert!(rows[1].contains("second</mark><a class=\"ref\" href=\"#t-1\">1</a> para"));
+    assert!(!rows[1].contains("id=\"t-1\""));
+}
+
+#[test]
+fn a_thread_in_an_empty_document_still_gets_its_card() {
+    let html = rpage("", &[T::new("aaaaaaaa", anchored(0, 0))]);
+    assert!(html.contains("id=\"t-1\""));
+}
+
+#[test]
+fn the_number_follows_the_last_mark_and_is_not_inside_one() {
+    let md = "alpha beta gamma\n";
+    let html = rpage(md, &[thread_on(md, "beta", "aaaaaaaa")]);
+    let doc = doc_html(&html);
+    let reference = doc.find("class=\"ref\"").unwrap();
+    let open = doc.find("<mark").unwrap();
+    let close = doc.rfind("</mark>").unwrap();
+    assert!(reference > close, "the number comes after the mark");
+    assert!(open < close && !doc[open..close].contains("class=\"ref\""));
+    assert!(doc.contains("<p>alpha <mark"));
+    assert!(doc.contains("beta</mark><a class=\"ref\" href=\"#t-1\">1</a> gamma</p>"));
+    // The text of the mark is only document text.
+    assert_eq!(marked_text_in(&doc, 1), "beta");
+}
+
+#[test]
+fn a_thread_marked_in_three_pieces_has_one_number_after_the_last_piece() {
+    let md = "start **bold** tail end\n";
+    let (s, _) = at(md, "start");
+    let (_, e) = at(md, "tail");
+    let html = rpage(md, &[T::new("aaaaaaaa", anchored(s, e))]);
+    let doc = doc_html(&html);
+    assert_eq!(doc.matches("data-thread=\"t-1\"").count(), 3);
+    assert_eq!(doc.matches("class=\"ref\"").count(), 1);
+    assert!(doc.rfind("</mark>").unwrap() < doc.find("class=\"ref\"").unwrap());
+    assert!(doc.contains(" tail</mark><a class=\"ref\" href=\"#t-1\">1</a> end"));
+}
+
+#[test]
+fn a_number_never_splits_a_word() {
+    let md = "Hello brave world\n";
+    let html = rpage(md, &[thread_on(md, "bra", "aaaaaaaa")]);
+    assert!(doc_html(&html).contains(">bra</mark>ve<a class=\"ref\" href=\"#t-1\">1</a> world"));
+    let html = page(md, &[thread_on(md, "bra", "aaaaaaaa")]);
+    assert!(source_html(&html).contains(">bra</mark>ve<a class=\"ref\" href=\"#t-1\">1</a> world"));
+    // Inside bold text the number still waits for the end of the word.
+    let md = "a **bold** here\n";
+    let html = rpage(md, &[thread_on(md, "bol", "aaaaaaaa")]);
+    assert!(doc_html(&html).contains(">bol</mark>d<a class=\"ref\""));
+}
+
+#[test]
+fn in_the_source_view_the_number_follows_the_text_and_sits_outside_the_marks() {
+    let md = "aa bb cc dd ee\n";
+    let html = page(
+        md,
+        &[
+            T::new("aaaaaaaa", anchored(3, 8)),
+            T::new("bbbbbbbb", anchored(6, 11)),
+        ],
+    );
+    let source = source_html(&html);
+    assert!(source.starts_with("aa <mark"));
+    assert!(source.contains("</mark><a class=\"ref\" href=\"#t-1\">1</a>"));
+    assert!(source.contains("</mark><a class=\"ref\" href=\"#t-2\">2</a>"));
+    assert_eq!(source.matches("class=\"ref\"").count(), 2);
+    assert_eq!(marked_text(&html, 1), "bb cc");
+    assert_eq!(marked_text(&html, 2), "cc dd");
+    assert!(source.find("#t-1").unwrap() > source.find("data-thread=\"t-1\"").unwrap());
+}
+
+#[test]
+fn the_style_has_no_colour_that_depends_on_state_or_status() {
+    let html = rpage("a\n", &[]);
+    for gone in [
+        "mark.s-",
+        "mark.changed",
+        "mark.anchored",
+        ".card.s-",
+        ".state.s-",
+        "--open",
+        "--resolved",
+        "--accepted",
+        "--rejected",
+        "underline dashed",
+        "border-left: 4px",
+    ] {
+        assert!(!html.contains(gone), "{gone}");
+    }
+    // One highlight colour, with a dark variant.
+    assert_eq!(html.matches("--mark:").count(), 2);
+    let dark = html.find("prefers-color-scheme: dark").unwrap();
+    assert!(html[dark..].contains("--mark:"));
+    assert!(html.contains("mark { background: var(--mark);"));
+    // The suggestion pair is the one place colour stays.
+    assert!(html.contains("del { color: var(--del); text-decoration: line-through; }"));
+    assert!(html.contains("ins { color: var(--ins);"));
+    assert!(html.contains(".card:target {"));
+}
+
+#[test]
+fn marks_carry_state_and_status_as_data_and_no_class() {
+    let mut t = thread_on("abc\n", "b", "aaaaaaaa");
+    t.state = "resolved";
+    let html = rpage("abc\n", &[t]);
+    assert!(
+        html.contains("<mark data-thread=\"t-1\" data-state=\"resolved\" data-status=\"anchored\"")
+    );
+    assert!(!html.contains("<mark class"));
+}
+
+#[test]
+fn cards_have_no_coloured_state_classes_and_resolved_ones_are_dimmed() {
+    let md = "abcdef\n";
+    let states = ["open", "resolved", "accepted", "rejected"];
+    let threads: Vec<T> = states
+        .iter()
+        .enumerate()
+        .map(|(i, state)| {
+            let mut t = T::new("aaaaaaaa", anchored(i, i + 1));
+            t.state = state;
+            t
+        })
+        .collect();
+    for html in [rpage(md, &threads), page(md, &threads)] {
+        assert!(!html.contains("class=\"card s-"));
+        assert!(html.contains("<article class=\"card dim\" id=\"t-2\" data-state=\"resolved\""));
+        for n in [1, 3, 4] {
+            assert!(
+                html.contains(&format!("<article class=\"card\" id=\"t-{n}\"")),
+                "{n}"
+            );
+        }
+        assert_eq!(html.matches("class=\"card dim\"").count(), 1);
+        assert!(html.contains(".card.dim { opacity:"));
+        // The state is a small grey label on the card.
+        for state in ["resolved", "accepted", "rejected"] {
+            assert!(html.contains(&format!("<span class=\"state\">{state}</span>")));
+        }
+    }
+}
+
+#[test]
+fn the_margin_stacks_under_its_block_on_a_narrow_screen() {
+    let html = rpage("a\n", &[]);
+    // Narrow is the default: a thin rule and a small indent, no space when empty.
+    assert!(html.contains(".margin { min-width: 0; display: flex; flex-direction: column;"));
+    assert!(html.contains("padding-left: 12px; border-left: 1px solid var(--line); }"));
+    assert!(html.contains(".margin:empty { display: none; }"));
+    // From 60rem a row is a document column and a margin column.
+    let wide = html.find("@media (min-width: 60rem)").unwrap();
+    let rule = &html[wide..wide + 400];
+    assert!(rule.contains("grid-template-columns: minmax(0, 46rem) 19rem"));
+    assert!(rule.contains(".margin { margin: 0; padding-left: 0; border-left: 0; }"));
+}
+
+#[test]
+fn orphans_and_applied_deletions_stay_after_the_document_in_both_views() {
+    let md = "alpha beta\n";
+    let lost = T::new("bbbbbbbb", orphaned());
+    let deleted = T::new("cccccccc", json!({"status": "applied"}));
+    let html = rpage(md, &[thread_on(md, "beta", "aaaaaaaa"), lost, deleted]);
+    let end = html.rfind("</aside></section>").unwrap();
+    let orphans = html.find("<h2>Orphaned comments</h2>").unwrap();
+    let applied = html.find("<h2>Applied deletions</h2>").unwrap();
+    assert!(end < orphans && orphans < applied);
+    assert_eq!(block_rows(&html).len(), 1);
+    assert!(!block_rows(&html)[0].contains("id=\"t-2\""));
+    assert!(html[orphans..applied].contains("id=\"t-2\""));
+    assert!(html[applied..].contains("id=\"t-3\""));
+    assert!(html.contains("3 threads: 1 anchored, 0 changed, 1 orphaned, 1 applied"));
 }
 
 // ---- a bare line break tag is the one inline HTML that is emitted as markup ----
