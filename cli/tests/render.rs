@@ -1518,3 +1518,62 @@ fn other_inline_html_stays_escaped_even_next_to_a_line_break() {
     assert!(page.contains("&lt;br class=a&gt;"), "{page}");
     assert!(!page.contains("<b "), "{page}");
 }
+
+// ---- comment bodies are markdown ----
+
+fn card_body_of(page: &str) -> String {
+    let start = page.find("<div class=\"body\">").expect("a body");
+    let end = page[start..].find("</div>").expect("the body closes");
+    page[start..start + end].to_string()
+}
+
+fn page_with_comment_body(body: &str) -> String {
+    let thread = json!({
+        "annotation": {
+            "id": "urn:uuid:4f0c2d1e-8a57-4c63-9f1b-2e6d7a90b3c4",
+            "motivation": "commenting",
+            "created": "2026-09-29T10:15:02Z",
+            "creator": {"type": "Person", "name": "Jim"},
+            "body": {"type": "TextualBody", "value": body, "format": "text/markdown"},
+            "target": {"selector": [{"type": "TextQuoteSelector", "exact": "word"}]}
+        },
+        "state": "open",
+        "anchor": {"status": "anchored", "start": 0, "end": 4, "line": 1, "column": 1, "text": "word"},
+        "stateChanges": [],
+        "replies": []
+    });
+    render_page("word here\n", &[thread])
+}
+
+#[test]
+fn a_comment_body_is_shown_rendered_as_markdown() {
+    let page =
+        page_with_comment_body("This is **great**, see `code` and a [link](https://example.com).");
+    let body = card_body_of(&page);
+    assert!(body.contains("<strong>great</strong>"), "{body}");
+    assert!(body.contains("<code>code</code>"), "{body}");
+    assert!(body.contains("href=\"https://example.com\""), "{body}");
+    assert!(!body.contains("**"), "{body}");
+}
+
+#[test]
+fn a_comment_body_cannot_inject_markup() {
+    let page = page_with_comment_body(
+        "<script>alert(1)</script> [x](javascript:alert(1)) ![p](https://e.com/p.png) <img src=x onerror=y>",
+    );
+    let body = card_body_of(&page);
+    assert!(!body.contains("<script"), "{body}");
+    assert!(!body.contains("<img"), "{body}");
+    assert!(!body.contains("href=\"javascript"), "{body}");
+    assert!(body.contains("&lt;script&gt;"), "{body}");
+}
+
+#[test]
+fn a_heading_in_a_comment_adds_no_id_to_the_page() {
+    let page = page_with_comment_body("# word\n\nbody");
+    let body = card_body_of(&page);
+    assert!(!body.contains(" id=\"md-"), "{body}");
+    // The document's own heading ids are untouched.
+    let doc = render_page("# word\n", &[]);
+    assert!(doc.contains(" id=\"md-word\""), "{doc}");
+}

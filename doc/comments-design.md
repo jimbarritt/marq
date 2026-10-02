@@ -376,7 +376,7 @@ the state is `open`.
 | `resolve ID`, `reopen ID` | State changes for a comment; `reopen` also reopens a rejected suggestion. |
 | `accept ID`, `reject ID` | State changes for a suggestion; `accept` also edits the file. |
 | `sync [--remote NAME]` | Fetch, merge and push `md-comments` (section 2.4). |
-| `render FILE [-o OUT.html] [--source]` | A static HTML page: the markdown rendered as a document, anchored and changed ranges in `<mark>` on the rendered text, a card for each thread beside it, orphans and applied deletions listed after it. `--source` shows the markdown source in a `<pre>` with a line gutter instead. |
+| `render FILE [-o OUT.html] [--source]` | A static HTML page: the markdown rendered as a document, anchored and changed ranges in `<mark>` on the rendered text, each thread's card beside the block it belongs to, orphans and applied deletions listed after it. `--source` shows the markdown source in a `<pre>` with a line gutter instead. |
 
 Global flags: `--author "Name <email>"`, `--agent`, `-C DIR` (run as if in DIR,
 as `git -C` does).
@@ -386,6 +386,10 @@ as `git -C` does).
 | Anchors given as a line plus a word | An agent and a person both think in "the word X on line N", and the line removes most ambiguity before the CLI computes offsets. |
 | `--range` as well | The marq UI later holds exact positions and must not have to reconstruct a word and a line. |
 | `render` shows the document rendered, with the source view behind `--source` | Jim's decision (2026-10-01): a person checks comments against the formatted document, not against markup. The source view stays because it shows exact character ranges. |
+| Every mark has one quiet highlight colour, whatever the thread's state or anchor status; state shows only as a small grey label on the card, and a resolved card is dimmed | Jim's decision (2026-10-02): different colours per comment are noisy. Colour stays only inside a suggestion card, where the struck-through and replacement text are the content. |
+| A thread's number is a small grey subscript after the end of its marked text, linking to its card | Jim's decision (2026-10-02): a superscript before the text is distracting. After the text, in grey, it marks the end of the comment without competing with the words. |
+| Each card sits in the row of the top-level block (paragraph, list, table, code block) that holds its first mark, beside it on a wide screen and under it on a narrow one | Jim's finding (2026-10-02): one column of cards at the top of the page puts a comment far from its highlight. A static page cannot align a card to a line, so a long block puts all its cards at its top. |
+| Comment text is shown rendered as markdown, by the same safe renderer as the document, and heading ids in it are dropped | The body is stored as `text/markdown`. Dropped ids cannot clash with the document's own. |
 | Anchors are mapped onto the rendered text through `pulldown-cmark`'s byte ranges for each event, and each thread's code-point range is converted to bytes once | One renderer reports which source characters each piece of output came from, so no second mapping is invented. |
 | Where rendered text differs from its source (entities such as `&amp;`, inline code whose line breaks became spaces, text inside a container whose prefix the parser strips), the whole piece is marked | The exact characters cannot be recovered; marking the piece is the honest approximation. Backslash escapes are exact: the parser emits the escaped character as its own event. |
 | A thread whose range covers only syntax that renders as nothing (`#`, `---`, a link destination, a table separator row, list markers, code fences) gets a card flagged "no rendered text" and its number at the next rendered position | The comment must still be seen, and a mark on nothing cannot be drawn. |
@@ -524,3 +528,4 @@ binary, which is how the harness itself is tested.
 - **A deleted line next to a different added line** reads as a rewrite of the line, because the line diff pairs them, so the anchor is `changed` on the new line, not `orphaned`.
 - **Marks on rendered text are approximate** where the rendered text differs from the source, as in section 6.1: entities, inline code with line breaks, and text in containers whose prefix the parser strips. A range that covers only syntax with no rendered text has a card and no mark.
 - **Wide tables** in the rendered view share their column with nothing but the cards, so a table with long cells is narrow and tall. It scrolls sideways inside its own box.
+- **A card beside a long block** (a big table or list, a long code block) sits at the top of that block, so its highlight can be far below it. Several cards in one block stack down the margin, and a tall stack leaves a gap in the document column. A product UI places each card at its highlight, as Notion does, which needs scripting that this static page avoids.

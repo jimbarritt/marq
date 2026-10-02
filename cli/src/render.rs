@@ -495,9 +495,32 @@ fn write_body(out: &mut String, annotation: &Value) {
         .filter(|b| b["purpose"].as_str() != Some("editing"))
     {
         if let Some(value) = b["value"].as_str() {
-            let _ = writeln!(out, "<p class=\"body\">{}</p>", esc(value));
+            let _ = writeln!(out, "<div class=\"body\">{}</div>", comment_html(value));
         }
     }
+}
+
+/// A comment's text as HTML. Comment bodies are markdown (`format` is
+/// `text/markdown`), so the card shows them rendered, through the same safe
+/// renderer as the document: raw HTML is escaped, only safe links get an `href`,
+/// images load nothing. Heading ids are dropped, because two ids with one value
+/// would clash with the document's own headings.
+fn comment_html(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    let rendered = write_rendered(value, &chars, &[]);
+    let html: String = rendered.blocks.iter().map(|b| b.html.as_str()).collect();
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html.as_str();
+    while let Some(at) = rest.find(" id=\"md-") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 5..];
+        match after.find('"') {
+            Some(end) => rest = &after[end + 1..],
+            None => rest = "",
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn write_replies(out: &mut String, replies: &Value) {
@@ -1258,7 +1281,13 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0; 
 .id { font: 11px ui-monospace, Menlo, Consolas, monospace; }
 .by { margin: 2px 0 4px; color: var(--muted); font-size: 12px; }
 .agent { font-style: italic; }
-.body { margin: 4px 0; font-size: 14px; white-space: pre-wrap; }
+.body { margin: 4px 0; font-size: 14px; overflow-wrap: anywhere; }
+.body > :first-child { margin-top: 0; }
+.body > :last-child { margin-bottom: 0; }
+.body p, .body ul, .body ol, .body pre, .body blockquote { margin: 0 0 6px; }
+.body h1, .body h2, .body h3, .body h4 { font-size: 14px; margin: 6px 0 4px; border: 0; padding: 0; }
+.body pre { overflow-x: auto; }
+.body table { display: block; overflow-x: auto; }
 .was, .quote { margin: 4px 0; font-size: 12px; color: var(--muted); }
 .quote { border-left: 2px solid var(--line); padding-left: 8px; margin-left: 0; white-space: pre-wrap; }
 .edit { margin: 4px 0; font: 13px ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; }
