@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| ID | M-COMMENTS-UI (provisional: Jim names it) |
+| ID | M-COMMENTS-UI |
 | Territory | marq |
-| Assignee | cloud agent for the code, a macOS runner for the proof (see open question 5) |
-| Blocked by | Jim's answers to the open questions below |
+| Assignee | cloud agent for the code; a GitHub Actions macOS runner and Jim's Mac for the proof |
+| Blocked by | none |
 
 ## Objective
 
@@ -15,8 +15,14 @@
 - Clicking highlighted text makes its card active: the card's highlight shows, and the card scrolls into view
   if it is off screen. Clicking a card makes its highlights active. Hovering a card highlights its text, as on
   the `render` page. Clicking anywhere else clears the active thread.
-- The numbers on cards and the grey subscript numbers after highlighted text are one option, on or off, set from
-  the View menu. The setting persists across launches.
+- The numbers on cards and the grey subscript numbers after highlighted text are one option. It is off by
+  default. A View menu item with a keyboard shortcut switches it. The setting persists across launches.
+- A second option shows or hides all comments: highlights, subscripts and cards. It is on by default. A View menu
+  item with a keyboard shortcut switches it. The setting persists across launches.
+- PDF export follows the window: with comments shown, the PDF carries the highlights and the cards; with comments
+  hidden, the PDF is the document alone, exactly as today.
+- `just bundle` builds `marq-comments` into `Marq.app`. Marq uses that copy, so the app and the CLI it reads always
+  match. The CLI stays installable on its own, for agents and the command line, as today.
 - The highlight is one colour, subtler than the `render` page's `rgba(255, 212, 0, 0.30)`, with a stronger
   version for the active thread. The colour is one token per theme in `template.html`, so a change is one line.
 - A card has a faint background and no border.
@@ -99,8 +105,14 @@ Jim decides:
   receives is not the file on disk, and code-point offsets into the file do not hold in it. The mapping accounts
   for this.
 - Search (`clearSearch`) restores `originalHTML`. The highlights survive a search and its clearing.
-- PDF export and `--export-pdf` print the document as today, with no comments (see open question 3).
+- With comments hidden, PDF export and `--export-pdf` print the document exactly as today. With comments shown,
+  the cards fit on the paper beside or below their text and the existing print measurements (`just probe-print`,
+  `pdftool`) report no new problem. The print path's scale (`PRINT_SHRINK_FACTOR`, CLAUDE.md) applies to the rail
+  as it does to tables.
 - No change to rendering for a file with no comments. `just check` baselines stay as they are.
+- Marq looks for the CLI in this order: `MARQ_COMMENTS_BIN` (the harness sets it), the copy inside `Marq.app`,
+  then a debug build's `cli/target/`. No `PATH` lookup: an app started from the Finder or the Dock gets a `PATH`
+  of `/usr/bin:/bin:/usr/sbin:/sbin`.
 - A spawned CLI that hangs, fails or prints bad JSON costs the render nothing: marq renders the markdown first
   and adds comments when the JSON arrives, with a timeout.
 - British English in code, comments and docs.
@@ -113,19 +125,15 @@ Jim decides:
 - Any change to `cli/`, except a bug the acceptance run finds in it, fixed with a test.
 - Homebrew packaging of the CLI.
 
-## Open questions for Jim
+## Jim's answers (2026-10-03)
 
-1. The mission's ID and name.
-2. The numbers option: on or off by default? A View menu item, a keyboard shortcut, or both?
-3. Is there also a switch to hide all comments? PDF export with comments: never, or an option?
-4. How marq finds `marq-comments`. A Mac app started from the Finder or the Dock gets a `PATH` of
-   `/usr/bin:/bin:/usr/sbin:/sbin`, so a binary in `~/.cargo/bin` or `/opt/homebrew/bin` is not found by name.
-   Options: a fixed list of places plus `MARQ_COMMENTS_BIN`; a path in preferences; the CLI built into
-   `Marq.app` by `just bundle`.
-5. Who runs the macOS acceptance. A cloud session cannot build Swift. Options: Jim runs one command on his Mac
-   and reads the page; or a GitHub Actions workflow on a macOS runner runs it on every push to `main`, with the
-   page as a build artifact. The second needs no human. It adds `.github/workflows/`, and on a private repo
-   macOS runner minutes cost ten times Linux minutes.
+1. The ID is M-COMMENTS-UI.
+2. Numbers are off by default, switched from a View menu item with a keyboard shortcut.
+3. A separate switch shows or hides all comments, from a View menu item with a keyboard shortcut. PDF export
+   follows it.
+4. Bundle the CLI in `Marq.app`. It still installs on its own and runs from the command line.
+5. Both: a GitHub Actions workflow on a macOS runner runs the acceptance on every push to `main`, and the same
+   `just` recipe runs on Jim's Mac.
 
 ## Plan
 
@@ -134,11 +142,14 @@ Jim decides:
 | T-00 | Read the intelligence | The `render` page, `template.html`'s render path, the gutter doc and the harness understood | none | open questions | TODO |
 | T-01 | Write the design | A new section of `doc/comments-design.md` for marq: the DOM mapping, the data flow, the toggles, the metrics block. One reason per decision | none | T-00 | TODO |
 | T-02 | Build the acceptance run first | `macos/ops/local/comments-acceptance.py` and a `just` recipe: fixture repos made with the real CLI, headless marq runs, assertions on metrics, one HTML page with screenshots. Fails until T-03 to T-06 land, and counts progress | none | T-01 | TODO |
-| T-03 | Swift: fetch and refresh | Find the CLI, spawn `list FILE --json` off the main thread with a timeout, pass the JSON to the page, refresh on file change and on `md-comments` change, the View menu option and its persistence, a harness flag for each toggle | none | T-01 | TODO |
+| T-03 | Swift: fetch and refresh | Find the CLI in the order above, spawn `list FILE --json` off the main thread with a timeout, pass the JSON to the page, refresh on file change and on `md-comments` change, the two View menu options with shortcuts and their persistence, a harness flag for each | none | T-01 | TODO |
 | T-04 | Template: range to DOM | Map each anchor's code-point range to rendered text and wrap it in marks, across emphasis, code spans, links, headings, list items, tables, and ranges that cross blocks. Unit fixtures checked in headless Chromium in a cloud session | none (Opus) | T-01 | TODO |
 | T-05 | Template: rail, cards, interaction | The rail outside `#content`, the stacked fallback, the subtler colour tokens, borderless cards, numbers as a class toggle, click and hover selection | none | T-04 | TODO |
 | T-06 | Metrics for comments | A `comments` block in `marqMetrics()`: per thread its status, marked text, mark and card rectangles, the vertical offset between them, overlaps, the active thread; and the gutter entries, for comparison on and off | none | T-04 | TODO |
-| T-07 | Prove on macOS | The acceptance run passes on macOS and `just check` passes with baselines unchanged | Jim or CI (question 5) | T-02 to T-06 | TODO |
+| T-09 | Print with comments | PDF export follows the show switch; cards fit the paper; `just probe-print` reports no new problem; with comments hidden the print baselines are unchanged | none | T-05 | TODO |
+| T-10 | Bundle the CLI | `just bundle` builds `marq-comments` in release and copies it into `Marq.app/Contents/MacOS/`; the standalone install still works | none | T-03 | TODO |
+| T-11 | CI on a macOS runner | `.github/workflows/` runs `cd cli && just test`, the comments acceptance and `cd macos && just check` on every push to `main`, and uploads the results page | none | T-02 | TODO |
+| T-07 | Prove on macOS | The acceptance run and `just check` pass in CI and on Jim's Mac | CI and Jim | T-02 to T-06, T-09 to T-11 | TODO |
 | T-08 | Write the completion report | `doc/planning/M-COMMENTS-UI/` report, as below | none | T-07 | TODO |
 
 **Essential task**: T-04. Every other part of the look exists on the `render` page. Marking the right text in a
@@ -162,6 +173,10 @@ width, and asserts on the `comments` and gutter metrics. None needs a human.
 - A `changed` anchor, an orphaned thread, an accepted suggestion and an applied deletion, each shown as on the
   `render` page.
 - Numbers on and numbers off: subscript and card numbers present, then absent, and nothing else moves.
+- Comments shown and hidden: hidden matches the plain render and the plain baseline exactly.
+- PDF with comments shown and hidden: hidden matches today's print metrics; shown reports no broken words and no
+  overflow.
+- The bundled `Marq.app` finds its own `marq-comments` with an empty `PATH`.
 - A simulated click on a highlight: its card active. A simulated click on a card: its highlights active.
 - The gutter: identical entries with comments on and off, on every fixture.
 - No comments, no git repo, no CLI, a CLI that hangs: the render matches the plain baseline.
@@ -176,7 +191,7 @@ write it back as your own.
 
 ## Execution constraints
 
-- Files: `macos/`, `doc/`, and `cli/` only for a bug fix with a test.
+- Files: `macos/`, `doc/`, `.github/workflows/`, and `cli/` only for a bug fix with a test.
 - A cloud session cannot build or run Swift. Do what a cloud session can prove there (the DOM mapping in headless
   Chromium against a copy of `template.html`'s script), and leave the proof of record to T-07. CLAUDE.md
   records that a Chrome reproduction is the wrong instrument for print. It is adequate for screen layout and for
