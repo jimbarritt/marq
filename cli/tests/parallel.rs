@@ -133,6 +133,18 @@ fn sync(dir: &Path) -> Run {
     marq(dir, &["sync"])
 }
 
+fn sync_with_no_guessable_identity(dir: &Path) -> Run {
+    finish(
+        command(dir, &["sync"])
+            .env("GIT_AUTHOR_NAME", "")
+            .env("GIT_AUTHOR_EMAIL", "")
+            .env("GIT_COMMITTER_NAME", "")
+            .env("GIT_COMMITTER_EMAIL", "")
+            .output()
+            .expect("the binary starts"),
+    )
+}
+
 /// Waits for a child up to `limit`. `None` means it is still running.
 fn wait_for(child: &mut Child, limit: Duration) -> Option<ExitStatus> {
     let start = Instant::now();
@@ -1744,8 +1756,8 @@ fn sync_merges_with_no_git_identity_anywhere() {
     // Without it, and with no identity in git, the merge still happens.
     author(a, 3, "Ann <ann@example.com>");
     author(b, 4, "Bob <bob@example.com>");
-    sync(a).ok();
-    sync(b).ok();
+    sync_with_no_guessable_identity(a).ok();
+    sync_with_no_guessable_identity(b).ok();
     assert_eq!(
         common::git(b, &["log", "-1", "--format=%p", "md-comments"])
             .split(' ')
