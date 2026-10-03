@@ -76,6 +76,8 @@ struct Identity {
 
 /// The name a merge commit carries when neither `--author` nor git names anyone.
 const FALLBACK_MERGE_NAME: &str = "marq-comments";
+const PARALLEL_READ_MIN: usize = 256;
+const PARALLEL_READ_WORKERS: usize = 8;
 
 /// What one `update-ref` with an expected old value did.
 enum RefUpdate {
@@ -566,10 +568,7 @@ impl Store {
         if entries.is_empty() {
             return Ok(Vec::new());
         }
-        let input: String = entries.iter().map(|(_, o)| format!("{o}\n")).collect();
-        let out = self
-            .git
-            .run_bytes(&["cat-file", "--batch"], Some(input.as_bytes()))?;
+        let out = self.cat_file_batches(entries)?;
         let mut files = Vec::with_capacity(entries.len());
         let mut at = 0;
         for (path, _) in entries {
@@ -595,6 +594,36 @@ impl Store {
             at += size + 1;
         }
         Ok(files)
+    }
+
+    fn cat_file_batches(&self, entries: &[(String, String)]) -> Result<Vec<u8>> {
+        let lines: Vec<String> = entries.iter().map(|(_, o)| format!("{o}\n")).collect();
+        if lines.len() < PARALLEL_READ_MIN {
+            return self
+                .git
+                .run_bytes(&["cat-file", "--batch"], Some(lines.concat().as_bytes()));
+        }
+        let per_worker = lines.len().div_ceil(PARALLEL_READ_WORKERS);
+        let outputs: Vec<Result<Vec<u8>>> = std::thread::scope(|scope| {
+            let workers: Vec<_> = lines
+                .chunks(per_worker)
+                .map(|chunk| {
+                    let git = &self.git;
+                    scope.spawn(move || {
+                        git.run_bytes(&["cat-file", "--batch"], Some(chunk.concat().as_bytes()))
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().expect("a cat-file worker panicked"))
+                .collect()
+        });
+        let mut out = Vec::new();
+        for output in outputs {
+            out.extend(output?);
+        }
+        Ok(out)
     }
 
     /// The annotations and state changes recorded for a document. An empty
