@@ -1,4 +1,4 @@
-# ![Marq](../assets/logo.svg) Marq Test Document
+# ![Marq](../macos/assets/logo.svg) Marq Test Document
 
 This is a test document for **Marq**, a macOS markdown viewer.
 
