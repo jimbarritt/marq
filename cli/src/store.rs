@@ -190,10 +190,19 @@ impl Store {
                 .root
                 .canonicalize()
                 .unwrap_or_else(|_| self.root.clone());
-            let inside = path
-                .strip_prefix(&self.root)
-                .or_else(|_| path.strip_prefix(&root))
-                .map_err(|_| Error::message(format!("{arg} is outside the repository")))?;
+            let candidates: Vec<PathBuf> = [Some(path.to_path_buf()), canonical_path(path)]
+                .into_iter()
+                .flatten()
+                .collect();
+            let roots = [self.root.clone(), root];
+            let inside = candidates
+                .iter()
+                .find_map(|candidate| {
+                    roots
+                        .iter()
+                        .find_map(|root| candidate.strip_prefix(root).ok())
+                })
+                .ok_or_else(|| Error::message(format!("{arg} is outside the repository")))?;
             inside.to_path_buf()
         } else {
             Path::new(&self.prefix).join(path)
@@ -974,6 +983,14 @@ impl Store {
             }),
         }
     }
+}
+
+fn canonical_path(path: &Path) -> Option<PathBuf> {
+    if let Ok(resolved) = path.canonicalize() {
+        return Some(resolved);
+    }
+    let parent = path.parent()?.canonicalize().ok()?;
+    Some(parent.join(path.file_name()?))
 }
 
 fn require_id(record: &Value) -> Result<&str> {
