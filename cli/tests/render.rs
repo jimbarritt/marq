@@ -236,7 +236,7 @@ fn marks_work_on_the_example_document() {
     );
     assert_eq!(marked_text(&html, 1), heading);
     // Text before the mark survives, escaped, in source order.
-    assert!(source_html(&html).contains("# ![Marq](../assets/logo.svg) "));
+    assert!(source_html(&html).contains("# ![Marq](../macos/assets/logo.svg) "));
 }
 
 #[test]

@@ -143,7 +143,7 @@ Jim decides:
 | T-10 | Build `render` | The static HTML page of design 6.1, checked by a test on a fixture | none | T-05, T-06 | DONE |
 | T-13 | Move `macos/examples/` to `example-docs/` | The example docs at the repo root for the app and the CLI; `macos/justfile` and `check-metrics.py` updated | none | T-02 | DONE, awaiting Jim's `cd macos && just check` |
 | T-14 | Build the acceptance run | `cli/justfile` and `cli/ops/local/acceptance.py`; `just acceptance` writes the scenario page of design 7.1. Written first, so it fails now and counts progress | none | T-13 | DONE: 0 of 10 scenarios pass until T-04 to T-10 land |
-| T-11 | Confirm on macOS | Jim runs `cd cli && just test && just acceptance` on macOS, both pass, and the page shows the expected results | Jim | T-07, T-14 | TODO |
+| T-11 | Confirm on macOS | Jim runs `cd cli && just test && just acceptance` on macOS, both pass, and the page shows the expected results | Jim | T-07, T-14 | DONE 2026-10-06 |
 | T-12 | Write the completion report | `doc/planning/M-COMMENTS/M-COMMENTS-git-backed-comments-report.md`, as the brief specifies | none | T-11 | TODO |
 
 **Essential task**: T-04. The mission fails if comments do not live in git alongside the
