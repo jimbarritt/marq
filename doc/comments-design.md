@@ -533,4 +533,205 @@ binary, which is how the harness itself is tested.
 - **Wide tables** in the rendered view sit in one centred column, so a table with long cells is narrow and tall. It scrolls sideways inside its own box.
 - **Clustered comments** push later cards down the rail, far below their highlights: three cards on one line sat at 1150, 1282 and 1373px. A card taller than the space before the next highlight pushes every later card down, and nothing is truncated or scrolled. Card numbers can run out of order down the rail, because cards are placed by the position of their highlight.
 - **On resize** every card is moved out of and back into the rail each time. That is fine at this size and would flicker on a very large page. A mark in a wide table that scrolls sideways can take its top from a scrolled-out cell; this is untested.
+
+## 9. Comments in the marq window
+
+Mission [M-COMMENTS-UI](planning/M-COMMENTS-UI-comments-in-marq.md). Marq spawns
+`marq-comments list FILE --json` (ADR 0002), reads the JSON of section 6.2, and
+draws each thread as a highlight in the document and a card in a right-hand rail.
+The `render` page (6.1) is the guideline for the look. Marq stays a viewer.
+
+### 9.1 Data flow
+
+1. `injectMarkdown()` rewrites relative image paths and calls `renderMarkdown(md, resetScroll)` as it does today. The render does not wait for comments.
+2. Swift stores the file text as read and the list of image-path rewrites it made, `[location, length, replacement]` in UTF-16 units of the file text.
+3. Swift spawns the CLI off the main thread: `marq-comments -C DIR list FILE --json`, with a 5 second limit, after which it kills the process.
+4. On exit 0 with valid JSON, and only when no newer `injectMarkdown()` has run, Swift calls `applyComments(payload)` through `callAsyncJavaScript` with `payload` as an argument. The payload is one JSON string: `{threads, source, bom, edits}`, where `bom` is true when the file's bytes start with `EF BB BF`.
+5. The page marks the text, builds the cards and places the rail. Any failure at steps 3 and 4 leaves the plain render in place, with no message.
+
+| Decision | Reason |
+|---|---|
+| The CLI is found in this order: `MARQ_COMMENTS_BIN`, the copy in `Marq.app/Contents/MacOS/`, then `cli/target/debug` and `cli/target/release` beside a debug build. No `PATH` lookup. An empty `MARQ_COMMENTS_BIN` disables comments | An app started from the Finder has a `PATH` of `/usr/bin:/bin:/usr/sbin:/sbin`. The empty value lets `just check` run with comments off, so its baselines do not depend on which comments this repository's own `md-comments` branch holds. |
+| The payload crosses as a `callAsyncJavaScript` argument, not as text built into a script | `injectMarkdown()` builds a JavaScript template literal and escapes three characters. Comment text is arbitrary and arrives from other writers, so a fourth character would break out of the literal. An argument needs no escaping. |
+| The render goes first and comments follow | A hung, failing or absent CLI then costs the render nothing, as the mission requires. |
+| Swift discards a result when a newer `injectMarkdown()` has run, and the page discards a payload whose rewritten source differs from the markdown it holds (9.2) | The file can change while the CLI runs. Both checks are cheap and the second cannot be skipped by a Swift bug. |
+| A headless run waits for the first comments outcome (a payload, an empty list, a failure, the timeout, or comments disabled by an empty `MARQ_COMMENTS_BIN`, which counts as an immediate outcome) before it settles and measures | Comments arrive after the render. Without the wait, a metrics run races the CLI. |
+| The page keeps the last payload and re-applies it after any wholesale replacement of `#content` | Search restores `originalHTML` (9.3). |
+
+### 9.2 From a file offset to a rendered offset
+
+The CLI's `start` and `end` count code points in the file on disk (4.1). The text
+that marked tokenises is a different string, so the page converts each offset
+through the steps below. All of them are plain functions of `source`, `bom` and
+`edits`.
+
+| Step | Transform | Reason it exists |
+|---|---|---|
+| 0 | When `bom` is true, subtract one code point from the offset, and an offset of 0 stays 0 | The CLI decodes the bytes with the byte order mark as a character. Swift's string reader drops it, so `source` and `md` lack it. |
+| 1 | Code points to UTF-16 units in `source`: add one for each astral character before the offset | JavaScript strings count UTF-16 units. |
+| 2 | File text to rewritten text: add `len(replacement) - length` for every edit that ends at or before the offset. An offset inside an edit snaps to its start, and an end inside an edit snaps to its end | `injectMarkdown()` rewrites image destinations, so the text rendered is not the file. |
+| 3 | Rewritten text to normalised text: subtract one for every `\r\n` before the offset. A lone `\r` becomes `\n` and shifts nothing | The template literal and marked's `lexer` both turn `\r\n` and `\r` into `\n`. |
+| 4 | Normalised text to lexed text, by marked's own rule: `text.replace(/^( *)(\t+)/gm, ...)`, which gives each tab in the first tab run after the leading spaces of a line four spaces. The page runs that regex with a callback and records each shift. `^` with the `m` flag also matches after U+2028 and U+2029. An offset inside a tab run snaps outward | marked 12.0.1 does this before it tokenises. Probed: `"\tindented"` gives a `code` token with raw `"    indented"`, and `" \t \tfoo"` expands only the first run. Reusing the regex keeps the page equal to marked on inputs that a hand-written split would not match. |
+
+The lexed text is the result of steps 3 and 4 applied to `md`. It is not the
+concatenation of the top-level tokens' raw text. The lexer consumes link
+reference definitions (`[x]: url`, and `[^1]: note`) without emitting a token, and
+it can add a line feed when a paragraph merges with indented code that follows
+it. The page therefore locates each token in the lexed text by search from a
+cursor, and accepts a token only when the gap between the cursor and the match is
+empty, whitespace, or whole definition lines. A token that fails is unmarked and
+does not move the cursor.
+
+Three gates guard the result, and each failure unmarks threads and leaves their cards.
+
+- **Gate 1.** The lexed text built from `source`, `bom` and `edits` must equal the lexed text of `md`. When it fails, no thread is marked and the metrics report `mapper: source-mismatch`.
+- **Gate 2.** For an `anchored` or `changed` thread, the slice of `source` between the CLI's code-point offsets must equal `anchor.text`. It checks the code-point arithmetic, and it does not depend on the rewrites.
+- **Gate 3.** The slice of the lexed text between the converted offsets must equal steps 2 to 4 applied to the slice of `source`. A range that spans a rewritten image passes, because both sides carry the rewrite.
+
+| Decision | Reason |
+|---|---|
+| The page does the conversion, from `source`, `bom` and `edits` that Swift passes | A cloud session cannot run Swift, and the mapping is the part that needs unit fixtures in headless Chromium. In Swift it could not be tested there. |
+| `source` is the file text with its line endings intact, the edits carry their replacement text, and `bom` is read from the file's bytes | The page can rebuild the exact string it rendered and compare, so an offset that does not apply to the rendered text is detected instead of used. Probed in Swift: `String(contentsOfFile:encoding:)` drops a leading `EF BB BF`. |
+| Tokens are located by search with a gap rule, not by summing raw lengths | Probed on all 32 `.md` files in the repository and on 200,000 generated inputs: the sum of raw lengths matches the lexed text except where a link definition is consumed or a paragraph merges with indented code. |
+| CRLF files map exactly | Step 3 covers them. The CLI's own limit on CRLF clones (section 8) concerns positions that differ between clones, not within one. |
+| `computeLineNumbers()` is not changed in its output | The gutter's entries must be identical with comments on and off. The mapping computes its own token offsets, which also covers the tokens that `indexOf` fails to locate today. Wrapping more tokens in `data-source-line` is a decision for Jim. |
+
+### 9.3 Marking rendered text
+
+**Contract.** For a thread whose anchor status is `anchored` or `changed`, the
+marks cover only rendered characters whose source characters lie inside the
+converted range. A mark is never widened to its leaf or its block. When some
+characters of the range cannot be mapped, the marks cover the rest and the card is
+flagged `partly-marked`. When none can, the thread has no mark and its card says so.
+
+**Strategy: token-guided alignment on the live DOM.**
+
+1. Lex `md` with `marked.lexer` and locate every token in the lexed text (9.2). A top-level token's source span is its located raw text, which is exact.
+2. Pair the tokens that get a wrapper (`_sourceLine` set, type not `space`) with `#content > [data-source-line]`. The pairing is accepted only when the two lists have the same length and each element's `data-source-line` equals the token's `_sourceLine`. Otherwise the whole document is unmarked and the metrics report `mapper: pairing`. An unclosed `<div>` in the markdown closes the wrapper early and nests the following wrappers, which breaks the count.
+3. Build the leaves of each token in order (`text`, `escape`, `codespan`, `code`, `br`, `image`) with their expected rendered text, taken from the token and decoded as the DOM decodes it. The rendered length of an entity is the length of its decoded text, which is not always one unit: `&fjlig;` gives two, `&#x1F600;` gives two UTF-16 units, and `&foo;` is not decoded.
+4. Map each leaf's characters to source characters by a monotone match inside the top-level token's source span, not inside the child's own `raw`. The child's `raw` is not reliable: marked strips blockquote and list prefixes, inserts a line feed for each list continuation line, expands tabs again inside containers, removes the escape of `|` in table cells, and trims code span padding. The matcher takes the next source character when it equals the next rendered character, and otherwise skips a source character only if it is syntax by the rules for the enclosing constructs:
+   - a blockquote marker run `>` and one space at each line start;
+   - a list marker and its task box `[ ]` or `[x]`, and the continuation indent of a line;
+   - the delimiters of emphasis, strong, strikethrough and links, and the whole destination and title of a link or image;
+   - a backslash before a punctuation character, with the pair treated as an atom;
+   - the backtick run and one padding space of a code span, a `\` before `|` in a table cell, the `|` separators, and the separator row;
+   - the fence lines and the indent of a code block.
+5. Verify the map. Every rendered character must match exactly one source character with the same value, the whole source span must be consumed, and every skipped character must be syntax by step 4. A leaf that fails is unmappable. An unmappable leaf takes a mark only when the converted range contains its whole source span.
+6. Align the leaves with the block element's text, which is the concatenation of its text nodes, search marks included, and without `.code-copy-btn`. Each leaf must start at the cursor, or after a gap of whitespace only, and when the leaves are used up only whitespace may remain. A block that fails takes no marks. Raw HTML inside a container renders text that no leaf accounts for, so it fails the block.
+7. For each thread, intersect the converted range with the mapped leaves, split the text nodes at the ends, and wrap each fragment in `<mark class="cm" data-thread="ID">`. A range that crosses elements gives one mark per text node.
+8. Append `<a class="cm-ref">N</a>` after the thread's last mark when numbers are on.
+
+| Decision | Reason |
+|---|---|
+| Align against expected text instead of searching the DOM for the anchor's text | The constraint is that a highlight never marks other text. A search for a repeated word marks the wrong occurrence. Alignment fixes the position from the source and uses the DOM only to confirm it. |
+| Not stamping `data-s` and `data-e` attributes during the render | The render would need to run again when the JSON arrives, which restarts mermaid and KaTeX and moves the scroll. A file with no comments would render different HTML. |
+| The matcher works inside the top-level token's span and verifies every character | A mapping that starts at a child's offset and runs on contiguously marks the wrong characters in a blockquote and in a list continuation. Probed: in `"> first line\n> second line\n"` a range on `second` lands on `cond l`. Equal characters cannot detect a wrong start in `1. 1`, so the marker rule is explicit. |
+| A leaf that fails to align fails its block | A wrong alignment would put marks on the wrong text. One unmarked card costs less than one wrong highlight. |
+| A code block's "Copy" button is not part of the block's text | Its label is a text node inside the block, and it would fail every code block. |
+| A mermaid block is identified by its token (`code` with `lang` mermaid) and takes no marks, whether or not the diagram has rendered. A block that holds `.katex` takes no marks, judged on the DOM at paint time. Both give the card flag `typeset-block` | The payload can arrive before `mermaid.run` resolves, when the div still holds diagram source. KaTeX also typesets prose such as `costs $5 and $6`, and the DOM is the only reliable witness. T-04 may relax this for leaves before the first typeset element. |
+| A range that covers only syntax that renders as nothing (`#`, `---`, a link destination, a table separator row, a list marker, a code fence) gives a card flagged `no-rendered-text` and no mark | The comment is still shown. A mark on nothing cannot be drawn. The same rule as 6.1. |
+| A `changed` thread is marked at its current range, and its card shows the original quote | 4.2. |
+| `orphaned` and `applied` threads have no mark and are listed after the document | The mission requires the same section as the `render` page. It sits outside `#content`, after `#page-wrapper`, indented to the text column, so no stray child enters `#content`. |
+| Overlapping threads give nested marks, and the overlap shows darker | One colour with transparency needs no rule for overlaps. |
+| `paintComments()` is idempotent. It unwraps every `mark.cm`, removes every `a.cm-ref` with its text, and paints again from the model. It runs after each of the three places that assign `content.innerHTML` (`renderMarkdown`, `clearSearch`, `performSearch`), after each payload, and when the options change | `originalHTML` is captured at two points: before KaTeX runs when there is no mermaid, and after mermaid when there is. A snapshot can hold marks from an older payload. The model is the one source. Unwrapping a number would leave its digits in the text. |
+| A payload that arrives while a search is active paints over the search marks, which split text nodes | Alignment reads the concatenated text of the block, so the splits do not matter, and a search mark nested inside a comment mark is valid. |
+| The second marked instance for card bodies: `new marked.Marked()` with `html` escaped as text, `image` as its alt text, and `link` kept only for `http:`, `https:` and `mailto:` | Card bodies are `text/markdown` written by other people. The template's marked passes raw HTML through, and the page can post to `webkit.messageHandlers`. This is the rule of 6.1: untrusted input never becomes markup. Authors, ids, dates and anchor text enter through `textContent`. |
+
+### 9.4 Cards, rail and layout
+
+The rail is `<aside id="comment-rail">`, a flex sibling after `#content` inside
+`#page-wrapper`. `#content` keeps its markup and its children. Each card is
+`position: absolute` inside the rail, and its top is the first mark's top relative
+to `#content`, pushed down by 8px where it would overlap the card above. A card
+with no mark sits at the position of the block that holds its range, or at the
+foot of the rail when it has none.
+
+| Decision | Reason |
+|---|---|
+| The rail exists only when comments are shown and at least one thread has a card. With no threads, `#page-wrapper` keeps its 1060px and the layout is today's | A file with no comments must render as it does now, and a rail that grows the wrapper would narrow the text column below a 1349px window. |
+| The rail is on when the body's content width is at least 1009px: 65px of gutter and margin, 640px of text, a 24px gap and a 280px rail. Below that, cards stack under the block that holds their first mark and the rail is removed | The `render` page does the same below 60rem. 640px is the narrowest column that tables still lay out in. |
+| With the rail on, `#page-wrapper` grows to `max-width: 1364px` and the text column takes the rest, up to its 980px cap | A rail inside the 1060px wrapper would shrink the text column and move every table width. Growing the wrapper keeps the text column at 980px on any window of 1349px or more, and narrows it only below that. |
+| Placement runs from the existing `ResizeObserver` on `#content` and from the `resize` handler, after `buildGutter()` | A cause of layout shift that rebuilds the gutter moves the marks too. The placement writes only to the rail, so it cannot resize `#content` and loop. |
+| `a.cm-ref` uses `font-size: .7em; line-height: 0; vertical-align: sub`, as `.ref` does on the `render` page. It is `display: none` when numbers are off | A subscript with a normal line height would grow the line box and move every gutter entry below it. The acceptance run compares the gutter with numbers on and off. |
+| Colours are two tokens in `:root`: `--cm-mark: rgba(233, 168, 0, 0.20)` and `--cm-mark-on: rgba(233, 168, 0, 0.38)`. A card is `rgba(31, 35, 40, 0.04)` with no border. The numbers are `#8b949e`, the gutter's grey | The template has one theme, so one pair of tokens is one per theme. The values are Notion's documented selection yellow in light mode, which is paler than the `render` page's `rgba(255, 212, 0, 0.30)`. A change is one line, and a dark theme adds one block. |
+| The card holds the fields of the `render` page card: state label, short id, author and time, the body as markdown, the edit lines of a suggestion, the original quote of a changed anchor, and the replies | The look is settled. The mission changes only the border, the colour and the numbers. |
+| Threads are numbered in document order, with unmarked threads after, ties by `created` | The `render` page numbers by list order, which leaves the numbers out of order down the rail (section 8). |
+
+### 9.5 Selection and options
+
+| Decision | Reason |
+|---|---|
+| A click on a `mark.cm` makes its thread active. A click on a card makes it active. A click elsewhere clears it. A click that ends a text selection, or lands on a link, does not change it | A drag to select text for copying must not move the selection of a thread. Links keep their behaviour. |
+| An active thread adds `.on` to its marks and its card. Hovering a card adds `.hover` to its marks | One strong colour state for each, as on the `render` page. |
+| Activating from a click on text scrolls the card into view with `block: 'nearest'`. Activating from a card does not scroll the text | The card is the thing that can be off screen. The reader is already looking at the text. |
+| The active thread persists across a repaint | The model holds its id. |
+| Two options, `commentsShown` (default true) and `commentNumbers` (default false), live in `UserDefaults` and are read with the `object(forKey:) != nil` pattern the zoom code uses | `bool(forKey:)` returns false for an unset key, which would turn comments off for a new user. |
+| A headless run ignores the stored options and takes the defaults, or the flags | Zoom does the same. A reader's last setting must not change a measurement. |
+| Show Comments is `⇧⌘C` and Comment Numbers is `⌥⌘C`, in the View menu with a checkmark | Neither is used by an existing menu item or by the template's keys. `⌘C` stays Copy. |
+| The options set a class on `<html>` (`cm-numbers`), and hiding comments runs `paintComments()` with nothing to paint: no marks, no numbers and no rail are in the DOM, and the wrapper keeps its 1060px | With comments hidden the DOM and the layout are today's, so the print baselines and the claim of identical print output rest on equal DOM, not on unstyled marks that still split text nodes. Whether WebKit shapes ligatures across an unstyled inline boundary was not measured, and this avoids the question. |
+| Harness flags: `--comments show\|hide`, `--comment-numbers on\|off`, `--comments-click mark:ID\|card:ID`. The click flag dispatches a real `click` event on the element | The event goes through the handler a reader's click uses. |
+
+### 9.6 Refresh
+
+| Decision | Reason |
+|---|---|
+| A change to the markdown file re-renders, then spawns the CLI again | The existing `FileWatcher` calls `loadAndInject()`, and the anchors are computed against the new text. |
+| Marq watches `<git-common-dir>/refs/heads` as a directory, and `<git-common-dir>/reftable` when it exists. It resolves the directory once with `git rev-parse --git-common-dir` when a file opens | `git update-ref` writes `refs/heads/md-comments.lock` and renames it over the ref. A watch on the ref file's descriptor follows the replaced inode and misses the next update. The directory sees the create and the rename. A worktree shares the common directory's refs (`cli/src/store.rs`). |
+| A ref event or a file event starts a 0.3 second debounce, then one spawn. The result is dropped when its JSON text equals the last one | `sync` and agents write in bursts, and unrelated writes in `refs/heads` give events with nothing new. |
+| A file outside a git repository has no ref watch and no comments | The CLI exits 1, and the render is the plain render. |
+
+### 9.7 Metrics
+
+`marqMetrics()` gains a `comments` block when a payload has been applied, and
+omits it otherwise. `tools/check-metrics.py` reads named keys, so the baselines
+are unchanged.
+
+| Field | Meaning |
+|---|---|
+| `shown`, `numbers` | The two options as applied |
+| `layout` | `rail`, `stacked` or `none` |
+| `mapper` | `ok`, or `source-mismatch` when the gate of 9.2 failed |
+| `threadCount`, `markedCount`, `unmarkedCount`, `orphanCount` | Counts |
+| `active` | The active thread's id, or null |
+| `threads[]` | One entry for each thread, in number order |
+| `threads[].id`, `number`, `state`, `status` | From the CLI, and the number of 9.4 |
+| `threads[].anchorText` | The CLI's `anchor.text` |
+| `threads[].markedText` | The text of the thread's marks joined in document order |
+| `threads[].exact` | `markedText === anchorText`. True for a plain word. Acceptance asserts `markedText` against the rendered words the scenario states, for ranges that span markup |
+| `threads[].flag` | `null`, `no-rendered-text`, `typeset-block`, `unaligned-block` or `source-mismatch` |
+| `threads[].marks[]` | `{top, left, width, height}` relative to `#content` |
+| `threads[].card` | `{top, left, width, height, inRail}`, or null |
+| `threads[].offsetPx` | Card top minus first mark top |
+| `threads[].replies` | Reply count |
+| `overlaps[]` | Pairs of thread ids whose cards intersect |
+| `orphans[]` | `{id, status}` for the threads listed after the document |
+| `gutter[]` | `{line, top}` as `buildGutter()` reads them, for comparison with comments hidden |
+| `markColour` | The computed background of a mark |
+
+| Decision | Reason |
+|---|---|
+| The block holds only what a rectangle or a string can assert | The acceptance run asserts on numbers (CLAUDE.md: judge by measurement, not by eye). |
+| `gutter[]` is part of it | It is the direct check of the constraint that the gutter does not change. |
+
+### 9.8 Print
+
+With comments shown, PDF export and `--export-pdf` print the highlights and the cards, in the stacked layout: each card under the block that holds its first mark, with `print-color-adjust: exact` on the marks. With comments hidden, the print path is today's. Task T-09 owns the detail.
+
+| Decision | Reason |
+|---|---|
+| Print always uses the stacked layout | `layoutTablesForPrint()` sizes tables to the full printable width, and a rail would change that measure and reopen the `PRINT_SHRINK_FACTOR` work. Stacking moves cards in the flow and leaves the tables' width alone. |
+| The cards move into the flow in `layoutTablesForPrint()` and back in `restoreTableLayoutAfterPrint()` | The export must leave the window as it found it. |
+| `just probe-print` and `pdftool` report on the shown case | They are the instruments that see the real print engine. A Chrome reproduction cannot (CLAUDE.md). |
+
+### 9.9 Limits
+
+- **Typeset blocks** (KaTeX, mermaid) take no marks (9.3).
+- **A document with an unclosed HTML block** (an unbalanced `<div>`) fails the pairing of 9.3 step 2 and shows every card unmarked.
+- **A document with a merged paragraph and indented code** (`x`, then an indented line, then `---`) changes marked's raw text for that token, so the token is unmarked.
+- **Ranges that cross a table row boundary** map only by the separators listed in 9.3 step 4, and unmappable cells take a mark only when the range contains the whole cell.
+- **A file whose lexing changes beyond 9.2** (a future marked version) fails the gate and shows every card unmarked, until 9.2 is updated.
+- **A range inside an image's alt text** has no rendered text, because an image is an element with no text node. The thread has a card and no mark.
+- **Overlapping threads** give a darker overlap with no way to tell the two apart by colour.
+- **A reftable repository** is watched through `reftable/`. A repository whose refs are only packed and updated by an external tool that does not write loose refs or reftable files is not watched, and the reader refreshes with ⌘R.
+- **The `source` text is passed twice** (the render and the payload). The cost is one file's text.
 - **Orphan and applied cards** use the full width below both columns, so they are wider than the cards in the rail.
