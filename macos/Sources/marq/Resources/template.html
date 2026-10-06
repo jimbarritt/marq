@@ -27,6 +27,11 @@
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    :root {
+        --cm-mark: rgba(233, 168, 0, 0.20);
+        --cm-mark-on: rgba(233, 168, 0, 0.38);
+    }
+
     body {
         background: #ffffff;
         color: #1f2328;
@@ -310,6 +315,129 @@
         background: #fdac54;
     }
 
+    mark.cm {
+        background: var(--cm-mark);
+        color: inherit;
+        padding: 0;
+    }
+    mark.cm.on,
+    mark.cm.hover {
+        background: var(--cm-mark-on);
+    }
+
+    a.cm-ref {
+        font-size: .7em;
+        line-height: 0;
+        vertical-align: sub;
+        color: #8b949e;
+        text-decoration: none;
+        user-select: none;
+        -webkit-user-select: none;
+        padding: 0 1px;
+    }
+    html:not(.cm-numbers) a.cm-ref {
+        display: none;
+    }
+
+    html.cm-rail #page-wrapper {
+        max-width: 1364px;
+    }
+
+    #comment-rail {
+        display: none;
+        position: relative;
+        flex: 0 0 280px;
+        width: 280px;
+        margin-left: 24px;
+        align-self: flex-start;
+    }
+    html.cm-rail #comment-rail {
+        display: block;
+    }
+
+    #comment-stack,
+    #comment-orphans {
+        max-width: 980px;
+    }
+    #comment-stack:empty,
+    #comment-orphans:empty {
+        display: none;
+    }
+    #comment-stack {
+        margin-top: 24px;
+    }
+    #comment-orphans h2 {
+        font-size: 1.05rem;
+        margin: 24px 0 8px;
+        color: #1f2328;
+    }
+
+    .cm-card {
+        --cm-muted: #656d76;
+        --cm-del: #a4504b;
+        --cm-ins: #3d7a50;
+        --cm-line: #d0d7de;
+        background: rgba(31, 35, 40, 0.04);
+        border: 0;
+        border-radius: 6px;
+        padding: 8px 10px;
+        min-width: 0;
+        font-size: 13px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+        color: #1f2328;
+        margin-bottom: 8px;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    #comment-rail > .cm-card {
+        position: absolute;
+        left: 0;
+        right: 0;
+        margin-bottom: 0;
+        background: #f6f6f7;
+        z-index: 1;
+    }
+    #comment-rail > .cm-card.on {
+        background: #eaebec;
+    }
+    .cm-card.dim {
+        opacity: .6;
+    }
+    .cm-card.on {
+        background: rgba(31, 35, 40, 0.09);
+    }
+    .cm-head {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0 10px;
+        align-items: baseline;
+        font-size: 12px;
+        color: var(--cm-muted);
+    }
+    .cm-num { color: #8b949e; }
+    .cm-id { font: 11px ui-monospace, Menlo, Consolas, monospace; }
+    .cm-by { margin: 2px 0 4px; color: var(--cm-muted); font-size: 12px; }
+    .cm-agent { font-style: italic; }
+    .cm-body { margin: 4px 0; font-size: 14px; overflow-wrap: anywhere; }
+    .cm-body > :first-child { margin-top: 0; }
+    .cm-body > :last-child { margin-bottom: 0; }
+    .cm-body p, .cm-body ul, .cm-body ol, .cm-body pre, .cm-body blockquote { margin: 0 0 6px; }
+    .cm-body h1, .cm-body h2, .cm-body h3, .cm-body h4, .cm-body h5, .cm-body h6 {
+        font-size: 14px; margin: 6px 0 4px; border: 0; padding: 0;
+    }
+    .cm-body ul, .cm-body ol { padding-left: 1.5em; }
+    .cm-body pre { overflow-x: auto; padding: 6px 8px; background: rgba(31, 35, 40, 0.05); border-radius: 4px; }
+    .cm-body table { display: block; overflow-x: auto; width: auto; }
+    .cm-was, .cm-quote { margin: 4px 0; font-size: 12px; color: var(--cm-muted); }
+    .cm-quote { border-left: 2px solid var(--cm-line); padding-left: 8px; white-space: pre-wrap; }
+    .cm-edit { margin: 4px 0; font: 13px ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; }
+    .cm-card del { color: var(--cm-del); text-decoration: line-through; }
+    .cm-card ins { color: var(--cm-ins); text-decoration: none; }
+    .cm-arrow { color: var(--cm-muted); }
+    .cm-replies { margin-top: 8px; border-left: 1px solid var(--cm-line); padding-left: 10px; }
+    .cm-reply { margin-top: 6px; }
+
     /* Link destination, shown on hover like a browser's status bar */
     #link-status {
         position: fixed;
@@ -355,6 +483,7 @@
         /* Screen-only chrome. */
         .toolbar,
         #line-gutter,
+        #comment-rail,
         #help-overlay,
         #search-overlay,
         #link-status,
@@ -428,6 +557,17 @@
             page-break-after: avoid;
         }
 
+        mark.cm,
+        .cm-card {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .cm-card {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+
         a {
             text-decoration: none;
         }
@@ -472,7 +612,10 @@
 <div id="page-wrapper">
     <div id="line-gutter" class="hidden"></div>
     <article class="markdown-body" id="content"></article>
+    <aside id="comment-rail" aria-label="Comments"></aside>
 </div>
+<section id="comment-stack"></section>
+<section id="comment-orphans"></section>
 
 <div id="link-status" aria-hidden="true"></div>
 
@@ -874,6 +1017,7 @@ function layoutTablesForPrint(widthPt, heightPt) {
     content.style.maxWidth = 'none';
     content.style.width = printWidthOverride + 'px';
 
+    commentsEnterPrint();
     layoutTables();
     return true;
 }
@@ -889,6 +1033,7 @@ function restoreTableLayoutAfterPrint() {
     document.querySelectorAll('#content table').forEach(function(t) {
         t.style.fontSize = '';
     });
+    commentsLeavePrint();
     layoutTables();
     buildGutter();
     return true;
@@ -1056,9 +1201,13 @@ function applyColumnWidths(table, widths, satisfied) {
     table.style.width = asPercent ? '100%' : total.toFixed(2) + 'px';
 }
 
+function contentTables(content) {
+    return Array.from(content.querySelectorAll('table')).filter(function(t) { return !t.closest('.cm-card'); });
+}
+
 function layoutTables() {
     const content = document.getElementById('content');
-    content.querySelectorAll('table').forEach(function(table) {
+    contentTables(content).forEach(function(table) {
         let wrapper = table.parentElement;
         if (!wrapper || !wrapper.classList.contains('table-wrapper')) {
             wrapper = document.createElement('div');
@@ -1090,7 +1239,7 @@ function marqMetrics(widthPt, heightPt) {
     const avail = availableTableWidth();
 
     const tables = [];
-    content.querySelectorAll('table').forEach(function(table, index) {
+    contentTables(content).forEach(function(table, index) {
         const wrapper = table.parentElement;
         const head = table.rows[0];
         const rect = table.getBoundingClientRect();
@@ -1173,6 +1322,8 @@ function marqMetrics(widthPt, heightPt) {
         images: images
     };
 
+    if (commentsState.applied) result.comments = commentsMetrics();
+
     if (printing) restoreTableLayoutAfterPrint();
     return JSON.stringify(result, null, 2);
 }
@@ -1212,6 +1363,7 @@ window.addEventListener('resize', function() {
     tableLayoutTimer = setTimeout(function() {
         layoutTables();
         buildGutter();
+        commentsPlace();
     }, 100);
 });
 
@@ -1251,6 +1403,8 @@ function renderMarkdown(md, resetScroll) {
             throwOnError: false
         });
     }
+
+    paintComments();
 
     // Initial gutter build; ResizeObserver below handles all subsequent rebuilds
     // (font load, async highlight, image load, window resize, etc.)
@@ -1378,6 +1532,7 @@ const gutterResizeObserver = new ResizeObserver(function() {
     if (content.querySelector(':scope > [data-source-line]')) {
         buildGutter();
     }
+    commentsPlace();
 });
 gutterResizeObserver.observe(document.getElementById('content'));
 
@@ -1578,6 +1733,7 @@ function clearSearch(skipRestore) {
     if (originalHTML && !skipRestore) {
         document.getElementById('content').innerHTML = originalHTML;
         layoutTables();
+        paintComments();
     }
 }
 
@@ -1595,7 +1751,10 @@ function performSearch(query) {
     const content = document.getElementById('content');
     content.innerHTML = originalHTML;
 
-    if (!query) return;
+    if (!query) {
+        paintComments();
+        return;
+    }
 
     // Use TreeWalker to find text nodes, skipping SVG/script/style elements
     const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
@@ -1658,6 +1817,7 @@ function performSearch(query) {
 
     // The restore above dropped the wrappers and column widths.
     layoutTables();
+    paintComments();
 
     if (searchMatches.length > 0) {
         currentMatchIndex = 0;
@@ -1697,6 +1857,1397 @@ function updateSearchCount() {
     } else {
         el.textContent = (currentMatchIndex + 1) + ' / ' + searchMatches.length;
     }
+}
+
+let commentsModel = null;
+const commentsState = {
+    mapper: null, shown: true, numbers: false, applied: false, layout: 'none',
+    printing: false, printPlaced: false, cards: [], hover: null
+};
+const COMMENT_RAIL_MIN_WIDTH = 1009;
+let commentsAnalysis = null;
+let commentDecoder = null;
+
+const COMMENT_ENTITY = /^&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/;
+const COMMENT_STATUSES_MARKED = { anchored: true, changed: true };
+
+function applyComments(payloadJson) {
+    const payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : (payloadJson || {});
+    commentsModel = {
+        threads: Array.isArray(payload.threads) ? payload.threads : [],
+        source: typeof payload.source === 'string' ? payload.source : '',
+        bom: !!payload.bom,
+        edits: Array.isArray(payload.edits) ? payload.edits : [],
+        active: commentsModel ? commentsModel.active : null,
+        entries: [],
+        ordered: []
+    };
+    commentsState.applied = true;
+    paintComments();
+    return true;
+}
+
+function setCommentOptions(options) {
+    const o = options || {};
+    commentsState.shown = o.shown !== false;
+    commentsState.numbers = !!o.numbers;
+    document.documentElement.classList.toggle('cm-numbers', commentsState.numbers);
+    paintComments();
+    return true;
+}
+
+function decodeHtmlText(html) {
+    if (!commentDecoder) commentDecoder = document.createElement('textarea');
+    commentDecoder.innerHTML = html;
+    return commentDecoder.value;
+}
+
+function commentShift(reps, offset, isEnd) {
+    let delta = 0;
+    for (let i = 0; i < reps.length; i++) {
+        const r = reps[i];
+        if (offset >= r.at + r.oldLen) {
+            delta += r.newLen - r.oldLen;
+        } else if (offset > r.at) {
+            return r.at + delta + (isEnd ? r.newLen : 0);
+        } else {
+            break;
+        }
+    }
+    return offset + delta;
+}
+
+function commentLexText(text) {
+    const crlf = [];
+    const normalised = text.replace(/\r\n|\r/g, function(m, at) {
+        crlf.push({ at: at, oldLen: m.length, newLen: 1 });
+        return '\n';
+    });
+    const tabs = [];
+    const lexed = normalised.replace(/^( *)(\t+)/gm, function(m, lead, run, at) {
+        for (let k = 0; k < run.length; k++) {
+            tabs.push({ at: at + lead.length + k, oldLen: 1, newLen: 4 });
+        }
+        return lead + '    '.repeat(run.length);
+    });
+    return { text: lexed, crlf: crlf, tabs: tabs };
+}
+
+function commentRewriteEdits(source, edits) {
+    const list = [];
+    for (let i = 0; i < edits.length; i++) {
+        const e = edits[i];
+        if (!Array.isArray(e) || e.length < 3) return null;
+        const at = Number(e[0]), len = Number(e[1]);
+        if (!Number.isInteger(at) || !Number.isInteger(len) || at < 0 || len < 0 || at + len > source.length) return null;
+        list.push({ at: at, oldLen: len, newLen: String(e[2]).length, replacement: String(e[2]) });
+    }
+    list.sort(function(a, b) { return a.at - b.at; });
+    let out = '';
+    let last = 0;
+    for (let i = 0; i < list.length; i++) {
+        if (list[i].at < last) return null;
+        out += source.slice(last, list[i].at) + list[i].replacement;
+        last = list[i].at + list[i].oldLen;
+    }
+    return { text: out + source.slice(last), edits: list };
+}
+
+function commentApplyEditsBefore(source, edits, end) {
+    let out = '';
+    let last = 0;
+    for (let i = 0; i < edits.length; i++) {
+        const e = edits[i];
+        if (e.at + e.oldLen > end) break;
+        out += source.slice(last, e.at) + e.replacement;
+        last = e.at + e.oldLen;
+    }
+    return out + source.slice(last, end);
+}
+
+function commentSnapToEdits(edits, offset, isEnd) {
+    for (let i = 0; i < edits.length; i++) {
+        const e = edits[i];
+        if (offset > e.at && offset < e.at + e.oldLen) return isEnd ? e.at + e.oldLen : e.at;
+    }
+    return offset;
+}
+
+function commentCodePointOffsets(text) {
+    const map = [0];
+    for (let i = 0; i < text.length;) {
+        const c = text.charCodeAt(i);
+        const pair = c >= 0xD800 && c <= 0xDBFF && i + 1 < text.length
+            && (text.charCodeAt(i + 1) & 0xFC00) === 0xDC00;
+        i += pair ? 2 : 1;
+        map.push(i);
+    }
+    return map;
+}
+
+function commentIsBlank(text) {
+    return /^[ \t\n]*$/.test(text);
+}
+
+function commentStripSpace(text) {
+    return text.replace(/\s+/g, '');
+}
+
+function commentGapIsDefinitions(gap) {
+    if (!/\]:/.test(gap)) return false;
+    try {
+        return marked.lexer(gap).every(function(t) { return t.type === 'space'; });
+    } catch (e) {
+        return false;
+    }
+}
+
+function commentLocateTokens(inner, tokens) {
+    const found = [];
+    let cursor = 0;
+    let pending = [];
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        const candidates = [token.raw];
+        if (token.type === 'text' && typeof token.text === 'string' && token.text !== token.raw) candidates.push(token.text);
+        let hit = null;
+        for (let c = 0; c < candidates.length && !hit; c++) {
+            const str = candidates[c];
+            if (!str) continue;
+            const at = inner.indexOf(str, cursor);
+            if (at < 0) continue;
+            const gap = inner.slice(cursor, at);
+            const ok = pending.length
+                ? commentStripSpace(gap) === commentStripSpace(pending.map(function(t) { return t.raw; }).join(''))
+                : commentIsBlank(gap) || commentGapIsDefinitions(gap);
+            if (ok) hit = { at: at, str: str };
+        }
+        if (hit) {
+            found.push(hit);
+            cursor = hit.at + hit.str.length;
+            pending = [];
+        } else {
+            found.push(null);
+            pending.push({ index: i, raw: token.raw || '' });
+        }
+    }
+    return found;
+}
+
+function commentExpandTabs(text, map) {
+    const outMap = [];
+    let out = '';
+    let last = 0;
+    text.replace(/^( *)(\t+)/gm, function(m, lead, run, at) {
+        for (let i = last; i < at + lead.length; i++) outMap.push(map ? map[i] : -1);
+        out += text.slice(last, at + lead.length);
+        for (let k = 0; k < run.length; k++) {
+            const src = map ? map[at + lead.length + k] : -1;
+            outMap.push(src, src, src, src);
+        }
+        out += '    '.repeat(run.length);
+        last = at + m.length;
+        return m;
+    });
+    for (let i = last; i < text.length; i++) outMap.push(map ? map[i] : -1);
+    out += text.slice(last);
+    return { text: out, map: map ? outMap : null };
+}
+
+function commentCheckMap(str, map, lexed) {
+    if (!map) return null;
+    for (let i = 0; i < str.length; i++) {
+        const at = map[i];
+        if (at == null || at < 0) return null;
+        const ch = lexed[at];
+        if (ch === str[i]) continue;
+        if (str[i] === ' ' && ch === '\t') continue;
+        return null;
+    }
+    return map;
+}
+
+function commentSubMap(map, start, length) {
+    return map ? map.slice(start, start + length) : null;
+}
+
+function commentLines(str) {
+    const lines = [];
+    let start = 0;
+    for (;;) {
+        const nl = str.indexOf('\n', start);
+        if (nl < 0) { lines.push({ start: start, text: str.slice(start) }); break; }
+        lines.push({ start: start, text: str.slice(start, nl) });
+        start = nl + 1;
+    }
+    return lines;
+}
+
+function commentSuffixLineMap(text, str, firstLine) {
+    const textLines = text.split('\n');
+    const rawLines = commentLines(str);
+    const map = [];
+    for (let k = 0; k < textLines.length; k++) {
+        const raw = rawLines[k + firstLine];
+        if (!raw) return null;
+        const line = textLines[k];
+        if (!raw.text.endsWith(line)) return null;
+        const skip = raw.text.length - line.length;
+        if (!commentIsBlank(raw.text.slice(0, skip))) return null;
+        for (let i = 0; i < line.length; i++) map.push(raw.start + skip + i);
+        if (k < textLines.length - 1) map.push(raw.start + raw.text.length);
+    }
+    return map;
+}
+
+function commentLeaf(analysis, text, pos, rawMap) {
+    let span = null;
+    if (rawMap && rawMap.length) {
+        let lo = Infinity, hi = -Infinity;
+        for (let i = 0; i < rawMap.length; i++) {
+            if (rawMap[i] < lo) lo = rawMap[i];
+            if (rawMap[i] > hi) hi = rawMap[i];
+        }
+        span = [lo, hi + 1];
+    }
+    analysis.leaves.push({ text: text, pos: pos, span: span });
+}
+
+function commentTextLeaf(analysis, token, map) {
+    const rendered = decodeHtmlText(token.text);
+    if (!map) return commentLeaf(analysis, rendered, null, null);
+    const raw = token.raw;
+    const pos = [];
+    let j = 0;
+    let i = 0;
+    while (i < rendered.length && j < raw.length) {
+        if (raw[j] === '&') {
+            const m = COMMENT_ENTITY.exec(raw.slice(j));
+            if (m) {
+                const decoded = decodeHtmlText(m[0]);
+                if (decoded !== m[0]) {
+                    if (rendered.substr(i, decoded.length) !== decoded) break;
+                    for (let k = 0; k < decoded.length; k++) pos.push([map[j], map[j + m[0].length - 1] + 1]);
+                    i += decoded.length;
+                    j += m[0].length;
+                    continue;
+                }
+            }
+        }
+        if (rendered[i] !== raw[j] && !(rendered[i] === ' ' && raw[j] === '\t')) break;
+        pos.push([map[j], map[j] + 1]);
+        i++;
+        j++;
+    }
+    const ok = i === rendered.length && j === raw.length;
+    commentLeaf(analysis, rendered, ok ? pos : null, map);
+}
+
+function commentCodespanLeaf(analysis, token, map) {
+    const rendered = decodeHtmlText(token.text);
+    const raw = token.raw;
+    const ticks = /^`+/.exec(raw);
+    let pos = null;
+    if (map && ticks && raw.endsWith(ticks[0]) && raw.length >= 2 * ticks[0].length) {
+        let inner = raw.slice(ticks[0].length, raw.length - ticks[0].length);
+        let start = ticks[0].length;
+        const flat = inner.replace(/\n/g, ' ');
+        if (/[^ ]/.test(flat) && /^ /.test(flat) && / $/.test(flat)) {
+            inner = inner.slice(1, -1);
+            start += 1;
+        }
+        if (inner.length === rendered.length) {
+            pos = [];
+            for (let i = 0; i < inner.length; i++) {
+                const same = inner[i] === rendered[i] || (inner[i] === '\n' && rendered[i] === ' ');
+                if (!same) { pos = null; break; }
+                pos.push([map[start + i], map[start + i] + 1]);
+            }
+        }
+    }
+    commentLeaf(analysis, rendered, pos, map);
+}
+
+function commentInline(analysis, tokens, str, map) {
+    let cursor = 0;
+    let lost = !map;
+    for (let t = 0; t < tokens.length; t++) {
+        const token = tokens[t];
+        const raw = token.raw || '';
+        let tmap = null;
+        if (!lost && str.startsWith(raw, cursor)) {
+            tmap = commentSubMap(map, cursor, raw.length);
+            cursor += raw.length;
+        } else {
+            lost = true;
+        }
+        commentInlineToken(analysis, token, tmap);
+    }
+}
+
+function commentInlineToken(analysis, token, map) {
+    switch (token.type) {
+    case 'text':
+        if (token.tokens) return commentInline(analysis, token.tokens, token.text, map);
+        return commentTextLeaf(analysis, token, map);
+    case 'escape': {
+        const rendered = decodeHtmlText(token.text);
+        let pos = null;
+        if (map && token.raw.length === 2 && token.raw[0] === '\\' && token.raw[1] === rendered) {
+            pos = [[map[0], map[1] + 1]];
+        }
+        return commentLeaf(analysis, rendered, pos, map);
+    }
+    case 'codespan':
+        return commentCodespanLeaf(analysis, token, map);
+    case 'br':
+    case 'html':
+    case 'image':
+        return commentLeaf(analysis, '', [], map);
+    case 'link':
+    case 'em':
+    case 'strong':
+    case 'del': {
+        const children = token.tokens || [];
+        const inner = children.map(function(c) { return c.raw || ''; }).join('');
+        let childMap = null;
+        if (map) {
+            const at = token.type === 'link'
+                ? token.raw.indexOf(inner, /^[\[<]/.test(token.raw) ? 1 : 0)
+                : token.raw.indexOf(inner, (token.raw.length - inner.length) >> 1);
+            const prefix = at >= 0 ? token.raw.slice(0, at) : null;
+            const prefixOk = prefix !== null && (token.type === 'link'
+                ? /^[\[<]?$/.test(prefix)
+                : /^[*_~]+$/.test(prefix));
+            if (prefixOk) childMap = commentSubMap(map, at, inner.length);
+        }
+        return commentInline(analysis, children, inner, childMap);
+    }
+    default:
+        analysis.fail = true;
+    }
+}
+
+function commentTableCells(line, start, count) {
+    const segments = [];
+    let segStart = 0;
+    for (let i = 0; i <= line.length; i++) {
+        if (i < line.length && line[i] !== '|') continue;
+        if (i < line.length) {
+            let slashes = 0;
+            for (let k = i - 1; k >= 0 && line[k] === '\\'; k--) slashes++;
+            if (slashes % 2) continue;
+        }
+        segments.push({ start: segStart, text: line.slice(segStart, i) });
+        segStart = i + 1;
+    }
+    if (segments.length && !segments[0].text.trim()) segments.shift();
+    if (segments.length && !segments[segments.length - 1].text.trim()) segments.pop();
+    if (count) {
+        if (segments.length > count) segments.splice(count);
+        while (segments.length < count) segments.push(null);
+    }
+    return segments.map(function(seg) {
+        if (!seg) return null;
+        const lead = seg.text.length - seg.text.replace(/^\s+/, '').length;
+        const body = seg.text.trim();
+        const map = [];
+        let text = '';
+        for (let i = 0; i < body.length; i++) {
+            if (body[i] === '\\' && body[i + 1] === '|') continue;
+            text += body[i];
+            map.push(start + seg.start + lead + i);
+        }
+        return { text: text, map: map };
+    });
+}
+
+function commentTable(analysis, token, str, map) {
+    const lines = map && str === token.raw ? commentLines(str) : null;
+    const cellList = [];
+    const header = token.header || [];
+    header.forEach(function(cell) { cellList.push({ cell: cell, line: 0, col: cellList.length }); });
+    (token.rows || []).forEach(function(row, r) {
+        row.forEach(function(cell, c) { cellList.push({ cell: cell, line: r + 2, col: c, count: header.length }); });
+    });
+    const perLine = {};
+    cellList.forEach(function(entry) {
+        let cmap = null;
+        if (lines && lines[entry.line]) {
+            if (!perLine[entry.line]) {
+                perLine[entry.line] = commentTableCells(lines[entry.line].text, lines[entry.line].start,
+                    entry.line === 0 ? 0 : header.length);
+            }
+            const located = perLine[entry.line][entry.col];
+            if (located && located.text === entry.cell.text) cmap = located.map.map(function(i) { return map[i]; });
+        }
+        commentInline(analysis, entry.cell.tokens || [], entry.cell.text, cmap);
+    });
+}
+
+function commentListItemMap(item, str) {
+    const lines = commentLines(str);
+    const textLines = item.text.split('\n');
+    if (textLines.length > lines.length) return null;
+    const map = [];
+    for (let k = 0; k < textLines.length; k++) {
+        const raw = lines[k];
+        const line = textLines[k];
+        let skip;
+        if (k === 0) {
+            const marker = /^ {0,3}(?:[*+-]|\d{1,9}[.)])/.exec(raw.text);
+            if (!marker || !raw.text.endsWith(line)) return null;
+            skip = raw.text.length - line.length;
+            if (skip < marker[0].length) return null;
+            const between = raw.text.slice(marker[0].length, skip);
+            const allowed = item.task ? /^[ \t]*\[[ xX]\][ \t]+$|^[ \t]*$/ : /^[ \t]*$/;
+            if (!allowed.test(between)) return null;
+        } else {
+            if (!raw.text.endsWith(line)) return null;
+            skip = raw.text.length - line.length;
+            if (!commentIsBlank(raw.text.slice(0, skip))) return null;
+        }
+        for (let i = 0; i < line.length; i++) map.push(raw.start + skip + i);
+        if (k < textLines.length - 1) map.push(raw.start + raw.text.length);
+    }
+    return map;
+}
+
+function commentBlockChildren(analysis, inner, innerMap, tokens) {
+    const expanded = commentExpandTabs(inner, innerMap);
+    const located = commentLocateTokens(expanded.text, tokens);
+    for (let i = 0; i < tokens.length; i++) {
+        const hit = located[i];
+        if (hit) {
+            commentBlock(analysis, tokens[i], hit.str, commentSubMap(expanded.map, hit.at, hit.str.length));
+        } else {
+            commentBlock(analysis, tokens[i], tokens[i].raw || '', null);
+        }
+    }
+}
+
+function commentBlock(analysis, token, str, map) {
+    map = commentCheckMap(str, map, analysis.lexed);
+    switch (token.type) {
+    case 'space':
+    case 'hr':
+    case 'def':
+    case 'html':
+        return;
+    case 'paragraph':
+    case 'text': {
+        if (!token.tokens) return commentTextLeaf(analysis, token, str === token.raw ? map : null);
+        const offset = map && str.startsWith(token.text) ? 0 : -1;
+        return commentInline(analysis, token.tokens, token.text,
+            offset === 0 ? commentSubMap(map, 0, token.text.length) : null);
+    }
+    case 'heading': {
+        let sub = null;
+        if (map && token.text) {
+            const prefix = /^ {0,3}(?:#{1,6}[ \t]*)?/.exec(str)[0].length;
+            const at = str.indexOf(token.text, prefix);
+            if (at >= 0) sub = commentSubMap(map, at, token.text.length);
+        }
+        return commentInline(analysis, token.tokens || [], token.text, sub);
+    }
+    case 'code': {
+        if (token.lang === 'mermaid') {
+            analysis.typeset = true;
+            return;
+        }
+        let pos = null;
+        if (map && token.text) {
+            const fenced = /^ {0,3}(`{3,}|~{3,})/.test(str);
+            const local = commentSuffixLineMap(token.text, str, fenced ? 1 : 0);
+            if (local) pos = local.map(function(i) { return [map[i], map[i] + 1]; });
+        }
+        return commentLeaf(analysis, token.text, pos, map);
+    }
+    case 'table':
+        return commentTable(analysis, token, str, map);
+    case 'blockquote': {
+        if (!map) return commentBlockChildren(analysis, token.text || '', null, token.tokens || []);
+        const innerMap = [];
+        let inner = '';
+        let last = 0;
+        str.replace(/^ *>[ \t]?/gm, function(m, at) {
+            for (let i = last; i < at; i++) innerMap.push(map[i]);
+            inner += str.slice(last, at);
+            last = at + m.length;
+            return '';
+        });
+        for (let i = last; i < str.length; i++) innerMap.push(map[i]);
+        inner += str.slice(last);
+        while (inner.endsWith('\n')) { inner = inner.slice(0, -1); innerMap.pop(); }
+        return commentBlockChildren(analysis, inner, innerMap, token.tokens || []);
+    }
+    case 'list': {
+        let cursor = 0;
+        (token.items || []).forEach(function(item) {
+            let itemMap = null;
+            if (map) {
+                const at = str.indexOf(item.raw, cursor);
+                if (at >= 0 && commentIsBlank(str.slice(cursor, at))) {
+                    cursor = at + item.raw.length;
+                    const local = commentListItemMap(item, item.raw);
+                    if (local) itemMap = local.map(function(i) { return map[at + i]; });
+                }
+            }
+            commentBlockChildren(analysis, item.text, itemMap, item.tokens || []);
+        });
+        return;
+    }
+    default:
+        analysis.fail = true;
+    }
+}
+
+function commentAnalyse(md) {
+    if (commentsAnalysis && commentsAnalysis.md === md) return commentsAnalysis;
+    const lexed = commentLexText(md).text;
+    const tokens = computeLineNumbers(md);
+    const located = commentLocateTokens(lexed, tokens);
+    const units = [];
+    let previousEnd = 0;
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        const hit = located[i];
+        const unit = {
+            token: token,
+            wrapped: token._sourceLine != null && token.type !== 'space',
+            span: hit ? [hit.at, hit.at + hit.str.length] : null,
+            leaves: [],
+            lexed: lexed,
+            typeset: false,
+            fail: false
+        };
+        if (hit) {
+            const map = [];
+            for (let k = 0; k < hit.str.length; k++) map.push(hit.at + k);
+            commentBlock(unit, token, hit.str, map);
+            previousEnd = unit.span[1];
+        } else {
+            commentBlock(unit, token, token.raw || '', null);
+        }
+        unit.after = previousEnd;
+        units.push(unit);
+    }
+    for (let i = units.length - 1, next = lexed.length; i >= 0; i--) {
+        if (units[i].span) next = units[i].span[0];
+        else units[i].span = [units[i].after, next];
+    }
+    commentsAnalysis = { md: md, lexed: lexed, units: units };
+    return commentsAnalysis;
+}
+
+function commentTextNodes(roots) {
+    const nodes = [];
+    roots.forEach(function(root) {
+        if (root.nodeType === Node.TEXT_NODE) { nodes.push(root); return; }
+        if (root.nodeType !== Node.ELEMENT_NODE) return;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+            acceptNode: function(node) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const tag = node.tagName.toLowerCase();
+                    if (tag === 'script' || tag === 'style') return NodeFilter.FILTER_REJECT;
+                    if (node.classList.contains('code-copy-btn') || node.classList.contains('cm-ref') || node.classList.contains('cm-card')) return NodeFilter.FILTER_REJECT;
+                    return NodeFilter.FILTER_SKIP;
+                }
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        });
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+    });
+    return nodes;
+}
+
+function commentIsTypeset(roots) {
+    return roots.some(function(root) {
+        return root.nodeType === Node.ELEMENT_NODE
+            && (root.matches('.katex, .mermaid') || !!root.querySelector('.katex, .mermaid'));
+    });
+}
+
+function commentAlign(group) {
+    const nodes = commentTextNodes(group.roots);
+    const starts = [];
+    let text = '';
+    nodes.forEach(function(node) { starts.push(text.length); text += node.data; });
+    group.nodes = nodes;
+    group.starts = starts;
+    group.domText = text;
+    const isSpace = function(ch) { return ch === ' ' || ch === '\n' || ch === '\t' || ch === '\r' || ch === '\f'; };
+    let cursor = 0;
+    for (let u = 0; u < group.units.length; u++) {
+        const leaves = group.units[u].leaves;
+        for (let l = 0; l < leaves.length; l++) {
+            const leaf = leaves[l];
+            leaf.dom = cursor;
+            if (!leaf.text) continue;
+            let p = cursor;
+            while (!text.startsWith(leaf.text, p)) {
+                if (p >= text.length || !isSpace(text[p])) return false;
+                p++;
+            }
+            leaf.dom = p;
+            cursor = p + leaf.text.length;
+        }
+    }
+    for (let p = cursor; p < text.length; p++) if (!isSpace(text[p])) return false;
+    return true;
+}
+
+function commentGroups(analysis, content) {
+    const wrappedUnits = analysis.units.filter(function(u) { return u.wrapped; });
+    const children = Array.from(content.childNodes);
+    const wrappers = children.filter(function(n) {
+        return n.nodeType === Node.ELEMENT_NODE && n.hasAttribute('data-source-line');
+    });
+    if (wrappers.length !== wrappedUnits.length) return null;
+    for (let i = 0; i < wrappers.length; i++) {
+        if (wrappers[i].getAttribute('data-source-line') !== String(wrappedUnits[i].token._sourceLine)) return null;
+    }
+    const groups = [];
+    let child = 0;
+    let w = 0;
+    let loose = null;
+    const flushLoose = function(until) {
+        const roots = [];
+        while (child < children.length && children[child] !== until) roots.push(children[child++]);
+        if (loose) { loose.roots = roots; groups.push(loose); loose = null; }
+    };
+    analysis.units.forEach(function(unit) {
+        if (unit.wrapped) {
+            flushLoose(wrappers[w]);
+            groups.push({ units: [unit], roots: [wrappers[w]] });
+            child++;
+            w++;
+        } else if (unit.token.type !== 'space') {
+            if (!loose) loose = { units: [], roots: [] };
+            loose.units.push(unit);
+        }
+    });
+    flushLoose(null);
+    return groups;
+}
+
+function commentConvertRange(model, analysis, anchor) {
+    const source = model.source;
+    const cp = model.cpOffsets;
+    let start = Number(anchor.start), end = Number(anchor.end);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) return null;
+    if (model.bom) { start = Math.max(0, start - 1); end = Math.max(0, end - 1); }
+    if (end >= cp.length) return null;
+    const us = cp[start], ue = cp[end];
+    if (source.slice(us, ue) !== anchor.text) return null;
+    const ss = commentSnapToEdits(model.rewrite.edits, us, false);
+    const se = commentSnapToEdits(model.rewrite.edits, ue, true);
+    const lex = model.lexedSource;
+    const toLexed = function(u, isEnd) {
+        const r = commentShift(model.rewrite.edits, u, isEnd);
+        const n = commentShift(lex.crlf, r, isEnd);
+        return commentShift(lex.tabs, n, isEnd);
+    };
+    const ls = toLexed(ss, false), le = toLexed(se, true);
+    const before = commentLexText(commentApplyEditsBefore(source, model.rewrite.edits, ss)).text;
+    const through = commentLexText(commentApplyEditsBefore(source, model.rewrite.edits, se)).text;
+    if (ls !== before.length || !through.startsWith(before)) return null;
+    if (lex.text.slice(ls, le) !== through.slice(before.length)) return null;
+    return [ls, le];
+}
+
+function commentUnpaint(content) {
+    content.querySelectorAll('a.cm-ref').forEach(function(a) { a.remove(); });
+    const parents = new Set();
+    content.querySelectorAll('mark.cm').forEach(function(mark) {
+        const parent = mark.parentNode;
+        if (!parent) return;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        parent.removeChild(mark);
+        parents.add(parent);
+    });
+    parents.forEach(function(p) { if (p.isConnected) p.normalize(); });
+}
+
+function commentPrepareModel(model, md) {
+    if (model.prepared === md) return model.mapperState;
+    model.prepared = md;
+    model.cpOffsets = commentCodePointOffsets(model.source);
+    model.rewrite = commentRewriteEdits(model.source, model.edits);
+    model.lexedSource = model.rewrite ? commentLexText(model.rewrite.text) : null;
+    model.mapperState = model.lexedSource && model.lexedSource.text === commentLexText(md).text ? 'ok' : 'source-mismatch';
+    return model.mapperState;
+}
+
+function paintComments() {
+    const content = document.getElementById('content');
+    if (!content) return;
+    commentsTeardown(content);
+    const model = commentsModel;
+    if (!model) { commentsState.mapper = null; return; }
+    model.entries = model.threads.filter(function(thread) {
+        return thread && thread.annotation && typeof thread.annotation.id === 'string';
+    }).map(function(thread) {
+        return { id: thread.annotation.id, thread: thread, marks: [], flag: null, markedText: '', number: 0, card: null, block: null };
+    });
+    if (!model.entries.some(function(e) { return e.id === model.active; })) model.active = null;
+    if (!commentsState.shown) {
+        commentsState.mapper = null;
+        commentsNumber(model);
+        commentsPlace();
+        return;
+    }
+
+    let mapper = commentPrepareModel(model, rawMarkdown);
+    const analysis = commentAnalyse(rawMarkdown);
+    const groups = mapper === 'ok' ? commentGroups(analysis, content) : null;
+    if (mapper === 'ok' && !groups) mapper = 'pairing';
+    commentsState.mapper = mapper;
+
+    if (groups) {
+        groups.forEach(function(group) {
+            group.typeset = group.units.some(function(u) { return u.typeset; }) || commentIsTypeset(group.roots);
+            group.aligned = !group.typeset
+                && !group.units.some(function(u) { return u.fail; })
+                && commentAlign(group);
+        });
+    }
+
+    const pieces = new Map();
+    const ranges = [];
+    model.entries.forEach(function(entry, index) {
+        const anchor = entry.thread.anchor || {};
+        if (!COMMENT_STATUSES_MARKED[anchor.status]) return;
+        if (mapper !== 'ok') { entry.flag = mapper === 'pairing' ? 'unaligned-block' : 'source-mismatch'; return; }
+        const range = commentConvertRange(model, analysis, anchor);
+        if (!range) { entry.flag = 'source-mismatch'; return; }
+        ranges[index] = range;
+        const outcome = commentMarkRange(groups, range, index, pieces);
+        entry.flag = commentFlag(outcome);
+    });
+
+    commentWrapPieces(pieces, model.entries);
+    const allMarks = Array.from(content.querySelectorAll('mark.cm'));
+    model.entries.forEach(function(entry, index) {
+        entry.marks = allMarks.filter(function(m) {
+            return m.getAttribute('data-thread') === entry.id;
+        });
+        entry.markedText = entry.marks.map(function(m) { return m.textContent; }).join('');
+        if (entry.marks.length) {
+            entry.block = commentOwningBlock(entry.marks[0], content);
+        } else if (ranges[index] && groups) {
+            entry.block = commentBlockOfRange(groups, ranges[index]);
+        }
+    });
+    commentsNumber(model);
+    paintCommentRefs(model);
+    commentsBuildCards(model);
+    commentsApplyActive();
+    commentsPlace();
+}
+
+function commentOwningBlock(node, content) {
+    let el = node;
+    while (el && el.parentNode !== content) el = el.parentNode;
+    return el && el.nodeType === Node.ELEMENT_NODE && el.hasAttribute('data-source-line') ? el : null;
+}
+
+function commentBlockOfRange(groups, range) {
+    for (let g = 0; g < groups.length; g++) {
+        const touched = groups[g].units.some(function(u) {
+            return u.span && u.span[0] < range[1] && u.span[1] > range[0];
+        });
+        if (!touched) continue;
+        const root = groups[g].roots[0];
+        return root && root.nodeType === Node.ELEMENT_NODE && root.hasAttribute('data-source-line') ? root : null;
+    }
+    return null;
+}
+
+function commentsTeardown(content) {
+    commentUnpaint(content);
+    document.querySelectorAll('.cm-card').forEach(function(card) { card.remove(); });
+    ['comment-rail', 'comment-stack', 'comment-orphans'].forEach(function(id) {
+        const el = document.getElementById(id);
+        while (el.firstChild) el.removeChild(el.firstChild);
+        el.style.minHeight = '';
+        el.style.marginLeft = '';
+    });
+    commentsState.cards = [];
+    commentsState.hover = null;
+    commentsState.layout = 'none';
+    commentsState.printPlaced = false;
+    document.documentElement.classList.remove('cm-rail');
+}
+
+function commentFirstText(mark) {
+    const walker = document.createTreeWalker(mark, NodeFilter.SHOW_TEXT);
+    return walker.nextNode() || mark;
+}
+
+function commentsNumber(model) {
+    const created = function(e) { return String((e.thread.annotation || {}).created || ''); };
+    const keys = new Map();
+    model.entries.forEach(function(e) { keys.set(e, e.marks.length ? commentFirstText(e.marks[0]) : null); });
+    const ordered = model.entries.slice();
+    ordered.sort(function(a, b) {
+        const ka = keys.get(a), kb = keys.get(b);
+        if (ka && !kb) return -1;
+        if (!ka && kb) return 1;
+        if (ka && kb && ka !== kb) {
+            return ka.compareDocumentPosition(kb) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+        }
+        const ca = created(a), cb = created(b);
+        if (ca !== cb) return ca < cb ? -1 : 1;
+        return model.entries.indexOf(a) - model.entries.indexOf(b);
+    });
+    ordered.forEach(function(e, i) { e.number = i + 1; });
+    model.ordered = ordered;
+}
+
+function paintCommentRefs(model) {
+    if (!commentsState.numbers) return;
+    model.ordered.forEach(function(entry) {
+        if (!entry.marks.length) return;
+        let anchor = entry.marks[entry.marks.length - 1];
+        while (anchor.parentNode && anchor.parentNode.matches && anchor.parentNode.matches('mark.cm')) anchor = anchor.parentNode;
+        const ref = document.createElement('a');
+        ref.className = 'cm-ref';
+        ref.setAttribute('data-thread', entry.id);
+        ref.textContent = String(entry.number);
+        anchor.parentNode.insertBefore(ref, anchor.nextSibling);
+    });
+}
+
+const COMMENT_SAFE_TAGS = {
+    p: 1, br: 1, strong: 1, em: 1, del: 1, code: 1, pre: 1, ul: 1, ol: 1, li: 1, blockquote: 1, a: 1,
+    h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1, hr: 1, table: 1, thead: 1, tbody: 1, tr: 1, th: 1, td: 1
+};
+let commentBodyParser = null;
+
+function commentEscape(text) {
+    const probe = document.createElement('div');
+    probe.textContent = text;
+    return probe.innerHTML;
+}
+
+function commentSafeHref(href) {
+    return /^(https?:|mailto:)/i.test(href || '');
+}
+
+function commentBodyMarked() {
+    if (commentBodyParser) return commentBodyParser;
+    commentBodyParser = new marked.Marked({
+        gfm: true,
+        async: false,
+        renderer: {
+            html: function(html) { return commentEscape(String(html)); },
+            image: function(href, title, alt) { return commentEscape(String(alt || '')); },
+            link: function(href, title, text) {
+                if (!commentSafeHref(href)) return text;
+                return '<a href="' + commentEscape(String(href)).replace(/"/g, '&quot;') + '">' + text + '</a>';
+            },
+            heading: function(text, level) { return '<h' + level + '>' + text + '</h' + level + '>\n'; },
+            checkbox: function(checked) { return checked ? '[x] ' : '[ ] '; }
+        }
+    });
+    return commentBodyParser;
+}
+
+function commentBodyFragment(markdown) {
+    const template = document.createElement('template');
+    let html = '';
+    try { html = commentBodyMarked().parse(String(markdown)); } catch (e) { html = commentEscape(String(markdown)); }
+    template.innerHTML = html;
+    template.content.querySelectorAll('*').forEach(function(el) {
+        const tag = el.tagName.toLowerCase();
+        if (!COMMENT_SAFE_TAGS[tag]) {
+            el.replaceWith(document.createTextNode(el.textContent));
+            return;
+        }
+        Array.from(el.attributes).forEach(function(attr) {
+            const keep = (tag === 'a' && attr.name === 'href' && commentSafeHref(attr.value))
+                || ((tag === 'th' || tag === 'td') && attr.name === 'align');
+            if (!keep) el.removeAttribute(attr.name);
+        });
+    });
+    return template.content;
+}
+
+function commentElement(tag, className, text) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+}
+
+function commentShortId(annotation) {
+    return String((annotation || {}).id || '').replace(/^urn:uuid:/, '').slice(0, 8);
+}
+
+function commentQuote(annotation) {
+    const selector = ((annotation || {}).target || {}).selector;
+    const list = Array.isArray(selector) ? selector : (selector ? [selector] : []);
+    const found = list.find(function(s) { return s && s.type === 'TextQuoteSelector'; });
+    return found && typeof found.exact === 'string' ? found.exact : '';
+}
+
+function commentBodies(annotation) {
+    const body = (annotation || {}).body;
+    return Array.isArray(body) ? body : (body && typeof body === 'object' ? [body] : []);
+}
+
+function commentFillByline(parent, annotation) {
+    const creator = (annotation || {}).creator || {};
+    const by = commentElement('p', 'cm-by');
+    by.appendChild(commentElement('span', 'cm-author', typeof creator.name === 'string' ? creator.name : 'unknown'));
+    if (creator.type === 'Software') {
+        by.appendChild(document.createTextNode(' '));
+        by.appendChild(commentElement('span', 'cm-agent', '(agent)'));
+    }
+    by.appendChild(document.createTextNode(' '));
+    by.appendChild(commentElement('time', '', typeof annotation.created === 'string' ? annotation.created : ''));
+    parent.appendChild(by);
+}
+
+function commentFillBody(parent, annotation) {
+    const bodies = commentBodies(annotation);
+    if (annotation.motivation === 'editing') {
+        const edit = bodies.find(function(b) { return b && b.purpose === 'editing'; });
+        const line = commentElement('div', 'cm-edit');
+        line.appendChild(commentElement('del', '', commentQuote(annotation)));
+        line.appendChild(document.createTextNode(' '));
+        line.appendChild(commentElement('span', 'cm-arrow', '→'));
+        line.appendChild(document.createTextNode(' '));
+        line.appendChild(commentElement('ins', '', edit && typeof edit.value === 'string' ? edit.value : ''));
+        parent.appendChild(line);
+    }
+    bodies.forEach(function(b) {
+        if (!b || b.purpose === 'editing' || typeof b.value !== 'string') return;
+        const div = commentElement('div', 'cm-body');
+        div.appendChild(commentBodyFragment(b.value));
+        parent.appendChild(div);
+    });
+}
+
+function commentFillReplies(parent, replies) {
+    if (!Array.isArray(replies) || !replies.length) return;
+    const box = commentElement('div', 'cm-replies');
+    replies.forEach(function(reply) {
+        const annotation = (reply && reply.annotation) || {};
+        const el = commentElement('div', 'cm-reply');
+        el.appendChild(commentElement('code', 'cm-id', commentShortId(annotation)));
+        commentFillByline(el, annotation);
+        commentFillBody(el, annotation);
+        commentFillReplies(el, reply && reply.replies);
+        box.appendChild(el);
+    });
+    parent.appendChild(box);
+}
+
+const COMMENT_FLAG_TEXT = {
+    'no-rendered-text': 'no rendered text',
+    'typeset-block': 'in a typeset block',
+    'unaligned-block': 'not marked',
+    'source-mismatch': 'not marked, text differs from the file',
+    'partly-marked': 'partly marked'
+};
+
+function commentBuildCard(entry) {
+    const thread = entry.thread;
+    const annotation = thread.annotation;
+    const anchor = thread.anchor || {};
+    const state = typeof thread.state === 'string' ? thread.state : 'open';
+    const card = commentElement('article', 'cm-card' + (state === 'resolved' ? ' dim' : ''));
+    card.setAttribute('data-thread', entry.id);
+    card.setAttribute('data-state', state);
+    card.setAttribute('data-status', typeof anchor.status === 'string' ? anchor.status : '');
+    const head = commentElement('header', 'cm-head');
+    if (commentsState.numbers) head.appendChild(commentElement('span', 'cm-num', String(entry.number)));
+    if (state !== 'open') head.appendChild(commentElement('span', 'cm-state', state));
+    if (annotation.motivation === 'editing') head.appendChild(commentElement('span', 'cm-kind', 'suggestion'));
+    if (COMMENT_STATUSES_MARKED[anchor.status]) {
+        if (Number.isInteger(anchor.line) && Number.isInteger(anchor.column)) {
+            head.appendChild(commentElement('span', 'cm-loc', anchor.line + ':' + anchor.column));
+        }
+        if (anchor.status === 'changed') head.appendChild(commentElement('span', 'cm-flag', 'changed'));
+        if (entry.flag && COMMENT_FLAG_TEXT[entry.flag]) head.appendChild(commentElement('span', 'cm-flag', COMMENT_FLAG_TEXT[entry.flag]));
+    } else {
+        head.appendChild(commentElement('span', 'cm-flag', anchor.status === 'applied' ? 'applied' : 'orphaned'));
+    }
+    head.appendChild(commentElement('code', 'cm-id', commentShortId(annotation)));
+    card.appendChild(head);
+    commentFillByline(card, annotation);
+    const quote = commentQuote(annotation);
+    if (anchor.status === 'changed') {
+        const was = commentElement('p', 'cm-was');
+        was.appendChild(document.createTextNode('was '));
+        was.appendChild(commentElement('q', '', typeof anchor.original === 'string' ? anchor.original : quote));
+        card.appendChild(was);
+    }
+    if (anchor.status === 'orphaned') card.appendChild(commentElement('blockquote', 'cm-quote', quote));
+    commentFillBody(card, annotation);
+    commentFillReplies(card, thread.replies);
+    return card;
+}
+
+function commentsBuildCards(model) {
+    const orphans = document.getElementById('comment-orphans');
+    const lists = { orphaned: [], applied: [] };
+    commentsState.cards = [];
+    model.ordered.forEach(function(entry) {
+        const status = (entry.thread.anchor || {}).status;
+        const card = commentBuildCard(entry);
+        entry.card = card;
+        if (COMMENT_STATUSES_MARKED[status]) commentsState.cards.push(entry);
+        else (status === 'applied' ? lists.applied : lists.orphaned).push(card);
+    });
+    [['orphaned', 'Orphaned comments'], ['applied', 'Applied deletions']].forEach(function(pair) {
+        if (!lists[pair[0]].length) return;
+        orphans.appendChild(commentElement('h2', '', pair[1]));
+        lists[pair[0]].forEach(function(card) { orphans.appendChild(card); });
+    });
+}
+
+function commentsBodyWidth() {
+    const style = getComputedStyle(document.body);
+    return document.documentElement.clientWidth
+        - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+}
+
+function commentsAdopt(parent, el) {
+    if (el.parentNode !== parent || parent.lastChild !== el) parent.appendChild(el);
+}
+
+function commentsPlace() {
+    const state = commentsState;
+    const root = document.documentElement;
+    const content = document.getElementById('content');
+    const rail = document.getElementById('comment-rail');
+    const stack = document.getElementById('comment-stack');
+    const orphans = document.getElementById('comment-orphans');
+    if (!content) return;
+    const entries = state.cards;
+    if (!state.shown || !commentsModel || !entries.length) {
+        state.layout = 'none';
+        root.classList.remove('cm-rail');
+        rail.style.minHeight = '';
+        return;
+    }
+    if (state.printing) {
+        if (state.printPlaced) return;
+        state.printPlaced = true;
+        state.layout = 'stacked';
+        root.classList.remove('cm-rail');
+        entries.forEach(function(entry) {
+            commentsAdopt(entry.block || stack, entry.card);
+        });
+        return;
+    }
+    const layout = commentsBodyWidth() >= COMMENT_RAIL_MIN_WIDTH ? 'rail' : 'stacked';
+    state.layout = layout;
+    root.classList.toggle('cm-rail', layout === 'rail');
+    const left = content.getBoundingClientRect().left + window.scrollX - (parseFloat(getComputedStyle(document.body).paddingLeft) || 0);
+    stack.style.marginLeft = left + 'px';
+    orphans.style.marginLeft = left + 'px';
+    if (layout === 'stacked') {
+        rail.style.minHeight = '';
+        entries.forEach(function(entry) { commentsAdopt(stack, entry.card); });
+        return;
+    }
+    entries.forEach(function(entry) { if (entry.card.parentNode !== rail) rail.appendChild(entry.card); });
+    const base = rail.getBoundingClientRect().top;
+    const rows = entries.map(function(entry, i) {
+        let anchorTop = null;
+        if (entry.marks.length) anchorTop = entry.marks[0].getBoundingClientRect().top - base;
+        else if (entry.block) anchorTop = entry.block.getBoundingClientRect().top - base;
+        return { entry: entry, i: i, top: anchorTop };
+    });
+    rows.sort(function(a, b) {
+        if (a.top === null && b.top !== null) return 1;
+        if (a.top !== null && b.top === null) return -1;
+        return (a.top === null ? 0 : a.top - b.top) || a.i - b.i;
+    });
+    let bottom = -8;
+    rows.forEach(function(row) {
+        const top = Math.max(row.top === null ? 0 : row.top, bottom + 8);
+        row.entry.card.style.top = top + 'px';
+        bottom = top + row.entry.card.offsetHeight;
+    });
+    rail.style.minHeight = Math.max(0, bottom) + 'px';
+}
+
+function commentsEnterPrint() {
+    commentsState.printing = true;
+    commentsState.printPlaced = false;
+    commentsPlace();
+}
+
+function commentsLeavePrint() {
+    commentsState.printing = false;
+    commentsState.printPlaced = false;
+    commentsPlace();
+}
+
+function commentEntry(id) {
+    const model = commentsModel;
+    if (!model) return null;
+    return model.entries.find(function(e) { return e.id === id; }) || null;
+}
+
+function commentsApplyActive() {
+    const model = commentsModel;
+    if (!model) return;
+    model.entries.forEach(function(entry) {
+        const on = model.active === entry.id;
+        entry.marks.forEach(function(m) { m.classList.toggle('on', on); });
+        if (entry.card) entry.card.classList.toggle('on', on);
+    });
+}
+
+function commentsSetActive(id, scrollToCard) {
+    const model = commentsModel;
+    if (!model) return;
+    model.active = id;
+    commentsApplyActive();
+    const entry = id ? commentEntry(id) : null;
+    if (scrollToCard && entry && entry.card && entry.card.isConnected) {
+        entry.card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+}
+
+function commentsSetHover(id) {
+    const model = commentsModel;
+    if (!model || commentsState.hover === id) return;
+    commentsState.hover = id;
+    model.entries.forEach(function(entry) {
+        entry.marks.forEach(function(m) { m.classList.toggle('hover', entry.id === id); });
+    });
+}
+
+function commentsClick(kind, id) {
+    const entry = commentEntry(id);
+    if (!entry) return false;
+    const target = kind === 'card' ? entry.card : entry.marks[0];
+    if (!target) return false;
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return true;
+}
+
+document.addEventListener('click', function(e) {
+    const model = commentsModel;
+    if (!model || !commentsState.shown || !e.target || !e.target.closest) return;
+    if (e.target.closest('a[href]')) return;
+    const selection = window.getSelection ? window.getSelection() : null;
+    if (selection && !selection.isCollapsed && String(selection).length > 0) return;
+    const mark = e.target.closest('mark.cm, a.cm-ref');
+    if (mark) {
+        commentsSetActive(mark.getAttribute('data-thread'), true);
+        return;
+    }
+    const card = e.target.closest('.cm-card');
+    if (card) {
+        commentsSetActive(card.getAttribute('data-thread'), false);
+        return;
+    }
+    if (model.active) commentsSetActive(null, false);
+});
+
+document.addEventListener('mouseover', function(e) {
+    if (!commentsModel || !e.target || !e.target.closest) return;
+    const card = e.target.closest('.cm-card');
+    commentsSetHover(card ? card.getAttribute('data-thread') : null);
+});
+
+document.addEventListener('mouseleave', function() { commentsSetHover(null); });
+
+function commentsGutterEntries() {
+    const content = document.getElementById('content');
+    const top = content.getBoundingClientRect().top;
+    const seen = new Set();
+    const entries = [];
+    content.querySelectorAll(':scope > [data-source-line]').forEach(function(el) {
+        const line = el.getAttribute('data-source-line');
+        if (seen.has(line)) return;
+        seen.add(line);
+        entries.push({ line: Number(line), top: round(el.getBoundingClientRect().top - top) });
+    });
+    return entries;
+}
+
+function commentsMetrics() {
+    commentsPlace();
+    const model = commentsModel;
+    const content = document.getElementById('content');
+    const base = content.getBoundingClientRect();
+    const rect = function(el) {
+        const r = el.getBoundingClientRect();
+        return { top: round(r.top - base.top), left: round(r.left - base.left), width: round(r.width), height: round(r.height) };
+    };
+    const entries = model ? model.ordered : [];
+    const refs = Array.from(document.querySelectorAll('a.cm-ref'));
+    const threads = entries.map(function(entry) {
+        const anchor = entry.thread.anchor || {};
+        const marks = entry.marks.map(rect);
+        let card = null;
+        if (entry.card && entry.card.isConnected) {
+            card = rect(entry.card);
+            card.inRail = entry.card.parentNode === document.getElementById('comment-rail');
+        }
+        const countReplies = function(list) {
+            return Array.isArray(list) ? list.reduce(function(n, r) { return n + 1 + countReplies(r && r.replies); }, 0) : 0;
+        };
+        const num = entry.card ? entry.card.querySelector('.cm-num') : null;
+        return {
+            id: entry.id,
+            number: entry.number,
+            state: entry.thread.state,
+            status: anchor.status,
+            anchorText: anchor.text === undefined ? null : anchor.text,
+            markedText: entry.markedText,
+            exact: entry.markedText === anchor.text,
+            flag: entry.flag,
+            marks: marks,
+            card: card,
+            offsetPx: card && marks.length ? round(card.top - marks[0].top) : null,
+            replies: countReplies(entry.thread.replies),
+            cardText: entry.card && entry.card.isConnected ? entry.card.textContent : null,
+            cardActive: !!entry.card && entry.card.classList.contains('on'),
+            marksActive: entry.marks.length > 0 && entry.marks.every(function(m) { return m.classList.contains('on'); }),
+            refCount: commentsState.numbers
+                ? refs.filter(function(r) { return r.getAttribute('data-thread') === entry.id; }).length : null,
+            cardNumber: commentsState.numbers && num ? Number(num.textContent) : null
+        };
+    });
+    const withCards = threads.filter(function(t) { return t.card; });
+    const overlaps = [];
+    for (let a = 0; a < withCards.length; a++) {
+        for (let b = a + 1; b < withCards.length; b++) {
+            const x = withCards[a].card, y = withCards[b].card;
+            if (x.top < y.top + y.height && y.top < x.top + x.height
+                && x.left < y.left + y.width && y.left < x.left + x.width) {
+                overlaps.push([withCards[a].id, withCards[b].id]);
+            }
+        }
+    }
+    const orphans = Array.from(document.querySelectorAll('#comment-orphans .cm-card')).map(function(card) {
+        return { id: card.getAttribute('data-thread'), status: card.getAttribute('data-status') };
+    });
+    const firstMark = content.querySelector('mark.cm');
+    return {
+        shown: commentsState.shown,
+        numbers: commentsState.numbers,
+        layout: commentsState.layout,
+        mapper: commentsState.mapper,
+        threadCount: threads.length,
+        markedCount: threads.filter(function(t) { return t.marks.length > 0; }).length,
+        unmarkedCount: threads.filter(function(t) {
+            return COMMENT_STATUSES_MARKED[t.status] && t.marks.length === 0;
+        }).length,
+        orphanCount: threads.filter(function(t) { return !COMMENT_STATUSES_MARKED[t.status]; }).length,
+        active: model ? model.active : null,
+        threads: threads,
+        overlaps: overlaps,
+        orphans: orphans,
+        gutter: commentsGutterEntries(),
+        markColour: getComputedStyle(firstMark || document.documentElement)
+            .getPropertyValue(firstMark ? 'background-color' : '--cm-mark').trim()
+    };
+}
+
+function commentMarkRange(groups, range, threadIndex, pieces) {
+    const outcome = { marked: 0, missed: 0, typeset: false, unaligned: false };
+    const inside = function(a, b) { return a >= range[0] && b <= range[1]; };
+    const overlaps = function(a, b) { return a < range[1] && b > range[0]; };
+    groups.forEach(function(group) {
+        const touched = group.units.some(function(u) { return u.span && overlaps(u.span[0], u.span[1]); });
+        if (!touched) return;
+        if (group.typeset) { outcome.typeset = true; return; }
+        if (!group.aligned) { outcome.unaligned = true; return; }
+        const indices = [];
+        group.units.forEach(function(unit) {
+            unit.leaves.forEach(function(leaf) {
+                if (!leaf.text) return;
+                if (leaf.pos) {
+                    for (let k = 0; k < leaf.pos.length; k++) {
+                        const p = leaf.pos[k];
+                        if (inside(p[0], p[1])) indices.push(leaf.dom + k);
+                        else if (overlaps(p[0], p[1])) outcome.missed++;
+                    }
+                } else if (leaf.span && inside(leaf.span[0], leaf.span[1])) {
+                    for (let k = 0; k < leaf.text.length; k++) indices.push(leaf.dom + k);
+                } else if (!leaf.span || overlaps(leaf.span[0], leaf.span[1])) {
+                    if (!leaf.span && !(unit.span && overlaps(unit.span[0], unit.span[1]))) return;
+                    outcome.missed++;
+                }
+            });
+        });
+        outcome.marked += indices.length;
+        commentAddPieces(group, indices, threadIndex, pieces);
+    });
+    return outcome;
+}
+
+function commentFlag(outcome) {
+    if (outcome.marked > 0) {
+        return outcome.missed || outcome.typeset || outcome.unaligned ? 'partly-marked' : null;
+    }
+    if (outcome.typeset) return 'typeset-block';
+    if (outcome.unaligned || outcome.missed) return 'unaligned-block';
+    return 'no-rendered-text';
+}
+
+function commentAddPieces(group, indices, threadIndex, pieces) {
+    indices.sort(function(a, b) { return a - b; });
+    let n = 0;
+    for (let i = 0; i < indices.length;) {
+        const at = indices[i];
+        while (n + 1 < group.starts.length && group.starts[n + 1] <= at) n++;
+        const node = group.nodes[n];
+        const nodeEnd = group.starts[n] + node.data.length;
+        let j = i;
+        while (j + 1 < indices.length && indices[j + 1] === indices[j] + 1 && indices[j + 1] < nodeEnd) j++;
+        if (!pieces.has(node)) pieces.set(node, []);
+        pieces.get(node).push({ s: at - group.starts[n], e: indices[j] + 1 - group.starts[n], thread: threadIndex });
+        i = j + 1;
+    }
+}
+
+function commentWrapPieces(pieces, entries) {
+    pieces.forEach(function(list, node) {
+        const cuts = new Set([0, node.data.length]);
+        list.forEach(function(p) { cuts.add(p.s); cuts.add(p.e); });
+        const sorted = Array.from(cuts).sort(function(a, b) { return a - b; });
+        const parts = [];
+        let rest = node;
+        for (let i = 1; i < sorted.length; i++) {
+            const length = sorted[i] - sorted[i - 1];
+            const next = i < sorted.length - 1 ? rest.splitText(length) : null;
+            parts.push({ node: rest, s: sorted[i - 1], e: sorted[i] });
+            rest = next;
+        }
+        parts.forEach(function(part) {
+            const covering = [];
+            list.forEach(function(p) {
+                if (p.s <= part.s && p.e >= part.e && covering.indexOf(p.thread) < 0) covering.push(p.thread);
+            });
+            if (!covering.length) return;
+            covering.sort(function(a, b) { return a - b; });
+            let inner = part.node;
+            const parent = inner.parentNode;
+            const outer = document.createElement('mark');
+            let current = outer;
+            covering.forEach(function(t, k) {
+                const mark = k === 0 ? outer : document.createElement('mark');
+                mark.className = 'cm';
+                mark.setAttribute('data-thread', entries[t].id);
+                if (k > 0) current.appendChild(mark);
+                current = mark;
+            });
+            parent.insertBefore(outer, inner);
+            current.appendChild(inner);
+        });
+    });
 }
 </script>
 

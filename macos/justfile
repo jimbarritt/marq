@@ -54,13 +54,13 @@ harness_dir := ".harness"
 #
 # Metrics for the screen layout, as JSON.
 probe FILE="../example-docs/test.md" WIDTH="960": _build
-    @.build/debug/marq {{FILE}} --width {{WIDTH}} --dump-metrics - --timeout 60 --harness-run 2>/dev/null
+    @MARQ_COMMENTS_BIN= .build/debug/marq {{FILE}} --width {{WIDTH}} --dump-metrics - --timeout 60 --harness-run 2>/dev/null
 
 # Column widths, font scale and broken words as they will print.
 #
 # Measures the A4 page without exporting anything.
 probe-print FILE="../example-docs/test.md": _build
-    @.build/debug/marq {{FILE}} --dump-metrics - --print --timeout 60 --harness-run 2>/dev/null
+    @MARQ_COMMENTS_BIN= .build/debug/marq {{FILE}} --dump-metrics - --print --timeout 60 --harness-run 2>/dev/null
 
 # Just the headline: anything listed here is a bug.
 problems FILE="../example-docs/test.md": _build
@@ -69,7 +69,7 @@ problems FILE="../example-docs/test.md": _build
     for mode in screen print; do
         flag=""; [ "$mode" = print ] && flag="--print"
         echo "== $mode"
-        .build/debug/marq {{FILE}} --width 960 --dump-metrics - $flag --timeout 60 --harness-run 2>/dev/null \
+        MARQ_COMMENTS_BIN= .build/debug/marq {{FILE}} --width 960 --dump-metrics - $flag --timeout 60 --harness-run 2>/dev/null \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d["problems"], indent=2)); print("tables:", [(t["index"], t["fillPct"], t["fontScale"]) for t in d["tables"]])'
     done
 
@@ -79,7 +79,7 @@ shot FILE="../example-docs/test.md" WIDTH="960": _build
     set -euo pipefail
     mkdir -p {{harness_dir}}
     OUT="{{harness_dir}}/$(basename {{FILE}} .md).png"
-    .build/debug/marq {{FILE}} --width {{WIDTH}} --export-png "$OUT" --timeout 60 --harness-run 2>/dev/null
+    MARQ_COMMENTS_BIN= .build/debug/marq {{FILE}} --width {{WIDTH}} --export-png "$OUT" --timeout 60 --harness-run 2>/dev/null
     echo "$OUT"
 
 # Export a PDF and report its shape. Prints the path.
@@ -88,7 +88,7 @@ pdf FILE="../example-docs/test.md": _build
     set -euo pipefail
     mkdir -p {{harness_dir}}
     OUT="{{harness_dir}}/$(basename {{FILE}} .md).pdf"
-    .build/debug/marq {{FILE}} --export-pdf "$OUT" --timeout 90 --harness-run 2>/dev/null
+    MARQ_COMMENTS_BIN= .build/debug/marq {{FILE}} --export-pdf "$OUT" --timeout 90 --harness-run 2>/dev/null
     .build/debug/pdftool info "$OUT" | python3 -c '
     import json, sys
     d = json.load(sys.stdin)
@@ -124,6 +124,10 @@ check *FIXTURES: _build
 bless *FIXTURES: _build
     @python3 tools/check-metrics.py --bless {{FIXTURES}}
 
+# Comment range-to-DOM fixtures and fuzz in headless Chrome. FUZZ sets the case count.
+test-mapping FUZZ="3000":
+    @MAPPING_FUZZ={{FUZZ}} node tests/comments-mapping/run.mjs
+
 # Headless runs carry a watchdog; a binary started by hand does not.
 #
 # Matches on the --harness-run tag in argv, not on the executable path: the
@@ -154,6 +158,12 @@ kill-probes:
     fi
     exit 0
 
+comments-acceptance *ARGS:
+    @python3 ops/local/comments-acceptance.py {{ARGS}}
+
+comments-acceptance-open:
+    @python3 ops/local/comments-acceptance.py --open
+
 _build:
     @swift build >&2
 
@@ -171,6 +181,10 @@ bundle: _build-release _build-icon
 
     # Copy binary
     cp .build/release/marq "$APP/Contents/MacOS/marq"
+
+    # Build and copy the comments CLI, so the app reads comments with the CLI it shipped with
+    (cd ../cli && cargo build --release)
+    cp ../cli/target/release/marq-comments "$APP/Contents/MacOS/marq-comments"
 
     # Copy Info.plist
     cp Sources/marq/Info.plist "$APP/Contents/Info.plist"

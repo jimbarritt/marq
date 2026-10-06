@@ -1,0 +1,77 @@
+name: comments
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  comments:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Git identity
+        run: |
+          git config --global init.defaultBranch main
+          git config --global user.name "Marq CI"
+          git config --global user.email "ci@example.com"
+
+      - name: Install just
+        run: brew install just
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cli/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('cli/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Swift version
+        run: swift --version
+
+      - name: CLI tests
+        working-directory: cli
+        run: just test
+
+      - name: CLI acceptance
+        working-directory: cli
+        run: just acceptance
+
+      - name: Layout baselines
+        working-directory: macos
+        run: just check
+
+      - name: Comments acceptance
+        if: always()
+        working-directory: macos
+        run: just comments-acceptance
+
+      - name: Upload CLI acceptance page
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-acceptance
+          path: cli/target/acceptance/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload comments acceptance page
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: comments-acceptance
+          path: macos/.harness/comments-acceptance/
+          retention-days: 14
+          if-no-files-found: warn

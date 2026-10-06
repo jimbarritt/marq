@@ -580,7 +580,7 @@ it can add a line feed when a paragraph merges with indented code that follows
 it. The page therefore locates each token in the lexed text by search from a
 cursor, and accepts a token only when the gap between the cursor and the match is
 empty, whitespace, or whole definition lines. A token that fails is unmarked and
-does not move the cursor.
+does not move the cursor. The next token is accepted after unmarked tokens when the gap, without whitespace, equals their `raw` text without whitespace, so one merged paragraph does not unmark the rest of the document.
 
 Three gates guard the result, and each failure unmarks threads and leaves their cards.
 
@@ -607,16 +607,17 @@ flagged `partly-marked`. When none can, the thread has no mark and its card says
 **Strategy: token-guided alignment on the live DOM.**
 
 1. Lex `md` with `marked.lexer` and locate every token in the lexed text (9.2). A top-level token's source span is its located raw text, which is exact.
-2. Pair the tokens that get a wrapper (`_sourceLine` set, type not `space`) with `#content > [data-source-line]`. The pairing is accepted only when the two lists have the same length and each element's `data-source-line` equals the token's `_sourceLine`. Otherwise the whole document is unmarked and the metrics report `mapper: pairing`. An unclosed `<div>` in the markdown closes the wrapper early and nests the following wrappers, which breaks the count.
+2. Pair the tokens that get a wrapper (`_sourceLine` set, type not `space`) with `#content > [data-source-line]`. The pairing is accepted only when the two lists have the same length and each element's `data-source-line` equals the token's `_sourceLine`. Otherwise the whole document is unmarked and the metrics report `mapper: pairing`. Each card is then flagged `unaligned-block`. A token that `computeLineNumbers()` did not locate, such as a code block indented by a tab, has no wrapper: the run of such tokens between two wrappers is aligned against the nodes between those wrappers. An unclosed `<div>` in the markdown closes the wrapper early and nests the following wrappers, which breaks the count.
 3. Build the leaves of each token in order (`text`, `escape`, `codespan`, `code`, `br`, `image`) with their expected rendered text, taken from the token and decoded as the DOM decodes it. The rendered length of an entity is the length of its decoded text, which is not always one unit: `&fjlig;` gives two, `&#x1F600;` gives two UTF-16 units, and `&foo;` is not decoded.
-4. Map each leaf's characters to source characters by a monotone match inside the top-level token's source span, not inside the child's own `raw`. The child's `raw` is not reliable: marked strips blockquote and list prefixes, inserts a line feed for each list continuation line, expands tabs again inside containers, removes the escape of `|` in table cells, and trims code span padding. The matcher takes the next source character when it equals the next rendered character, and otherwise skips a source character only if it is syntax by the rules for the enclosing constructs:
-   - a blockquote marker run `>` and one space at each line start;
-   - a list marker and its task box `[ ]` or `[x]`, and the continuation indent of a line;
-   - the delimiters of emphasis, strong, strikethrough and links, and the whole destination and title of a link or image;
-   - a backslash before a punctuation character, with the pair treated as an atom;
-   - the backtick run and one padding space of a code span, a `\` before `|` in a table cell, the `|` separators, and the separator row;
-   - the fence lines and the indent of a code block.
-5. Verify the map. Every rendered character must match exactly one source character with the same value, the whole source span must be consumed, and every skipped character must be syntax by step 4. A leaf that fails is unmappable. An unmappable leaf takes a mark only when the converted range contains its whole source span.
+4. Map each leaf's characters to source characters through the containers, not through the child's own `raw` alone. The child's `raw` is not reliable: marked strips blockquote and list prefixes, inserts a line feed for each list continuation line, expands tabs again inside containers, removes the escape of `|` in table cells, and trims code span padding. Each container rebuilds the string marked lexed its children from, with a map back to the lexed text:
+   - a blockquote applies marked's own `/^ *>[ \t]?/gm` removal and trailing line-feed trim, and records each removed character;
+   - a list item matches each line of its `text` as a suffix of the same line of its `raw`. The first line may drop only the marker, whitespace and a task box; later lines only leading whitespace;
+   - a table splits each source row at unescaped `|`, trims each cell, and drops the `\` before an escaped `|`;
+   - a fenced or indented code block matches each line of its text as a suffix of the matching source line, after the fence line, dropping only leading whitespace;
+   - a heading's text is found after its `#` run;
+   - inside a container, children are located in the rebuilt string by the gap rule of 9.2, after marked's tab expansion is applied to it, and a `text` token is located by its `text` when its `raw` carries inserted line feeds;
+   - an inline token with children (`em`, `strong`, `del`, `link`) holds the concatenation of its children's `raw` after a prefix of delimiters only (`*`, `_`, `~`, or `[` or `<` for a link). The destination and title of a link or image are never mapped.
+5. Verify the map. Every character of a rebuilt string must equal the lexed character it maps to, or be a space mapped to a tab. Inside a leaf, every rendered character must equal its source character, or be an atom: a decoded entity, a backslash escape, or a code span line feed rendered as a space. A leaf that fails is unmappable. An unmappable leaf takes a mark only when the converted range contains its whole source span.
 6. Align the leaves with the block element's text, which is the concatenation of its text nodes, search marks included, and without `.code-copy-btn`. Each leaf must start at the cursor, or after a gap of whitespace only, and when the leaves are used up only whitespace may remain. A block that fails takes no marks. Raw HTML inside a container renders text that no leaf accounts for, so it fails the block.
 7. For each thread, intersect the converted range with the mapped leaves, split the text nodes at the ends, and wrap each fragment in `<mark class="cm" data-thread="ID">`. A range that crosses elements gives one mark per text node.
 8. Append `<a class="cm-ref">N</a>` after the thread's last mark when numbers are on.
@@ -626,6 +627,7 @@ flagged `partly-marked`. When none can, the thread has no mark and its card says
 | Align against expected text instead of searching the DOM for the anchor's text | The constraint is that a highlight never marks other text. A search for a repeated word marks the wrong occurrence. Alignment fixes the position from the source and uses the DOM only to confirm it. |
 | Not stamping `data-s` and `data-e` attributes during the render | The render would need to run again when the JSON arrives, which restarts mermaid and KaTeX and moves the scroll. A file with no comments would render different HTML. |
 | The matcher works inside the top-level token's span and verifies every character | A mapping that starts at a child's offset and runs on contiguously marks the wrong characters in a blockquote and in a list continuation. Probed: in `"> first line\n> second line\n"` a range on `second` lands on `cond l`. Equal characters cannot detect a wrong start in `1. 1`, so the marker rule is explicit. |
+| Containers rebuild marked's own inner string with a map, instead of a flat matcher with skip rules | The rebuild repeats marked 12.0.1's transforms, so each child's position comes from structure, and the character check confirms it. A flat matcher needs a rule for each kind of skipped character and a separate check that the skip was syntax. Measured: 19,708 fuzz cases, half generated from nested blockquotes, lists, tables, tabs and entities, marked no character outside the range. |
 | A leaf that fails to align fails its block | A wrong alignment would put marks on the wrong text. One unmarked card costs less than one wrong highlight. |
 | A code block's "Copy" button is not part of the block's text | Its label is a text node inside the block, and it would fail every code block. |
 | A mermaid block is identified by its token (`code` with `lang` mermaid) and takes no marks, whether or not the diagram has rendered. A block that holds `.katex` takes no marks, judged on the DOM at paint time. Both give the card flag `typeset-block` | The payload can arrive before `mermaid.run` resolves, when the div still holds diagram source. KaTeX also typesets prose such as `costs $5 and $6`, and the DOM is the only reliable witness. T-04 may relax this for leaves before the first typeset element. |
@@ -655,6 +657,8 @@ foot of the rail when it has none.
 | `a.cm-ref` uses `font-size: .7em; line-height: 0; vertical-align: sub`, as `.ref` does on the `render` page. It is `display: none` when numbers are off | A subscript with a normal line height would grow the line box and move every gutter entry below it. The acceptance run compares the gutter with numbers on and off. |
 | Colours are two tokens in `:root`: `--cm-mark: rgba(233, 168, 0, 0.20)` and `--cm-mark-on: rgba(233, 168, 0, 0.38)`. A card is `rgba(31, 35, 40, 0.04)` with no border. The numbers are `#8b949e`, the gutter's grey | The template has one theme, so one pair of tokens is one per theme. The values are Notion's documented selection yellow in light mode, which is paler than the `render` page's `rgba(255, 212, 0, 0.30)`. A change is one line, and a dark theme adds one block. |
 | The card holds the fields of the `render` page card: state label, short id, author and time, the body as markdown, the edit lines of a suggestion, the original quote of a changed anchor, and the replies | The look is settled. The mission changes only the border, the colour and the numbers. |
+| On screen, stacked cards sit in `<section id="comment-stack">` after `#page-wrapper`, in number order, indented to the text column. They do not sit under their blocks | A card inside a block's wrapper moves every later block top, so the gutter would differ from the hidden run, and its text would enter the block text that the mapping aligns. Print is the exception (9.8): it puts the cards under their blocks. |
+| A table wider than the text column runs under the rail. Rail cards have an opaque background that matches the card colour on white, and a higher `z-index` | Narrowing tables to the column when the rail is on changes their heights, so the gutter would differ from the hidden run on `example-docs/test.md`, whose tables are 1336px wide at a 1400px window. |
 | Threads are numbered in document order, with unmarked threads after, ties by `created` | The `render` page numbers by list order, which leaves the numbers out of order down the rail (section 8). |
 
 ### 9.5 Selection and options
@@ -682,8 +686,8 @@ foot of the rail when it has none.
 
 ### 9.7 Metrics
 
-`marqMetrics()` gains a `comments` block when a payload has been applied, and
-omits it otherwise. `tools/check-metrics.py` reads named keys, so the baselines
+`marqMetrics()` gains a `comments` block when a payload has been applied, including a payload with no threads and including when comments are hidden, and
+omits it otherwise. `gutter[]` is read from this block, so a hidden run carries a block with `gutter` and no marks. `tools/check-metrics.py` reads named keys, so the baselines
 are unchanged.
 
 | Field | Meaning |
@@ -703,6 +707,9 @@ are unchanged.
 | `threads[].card` | `{top, left, width, height, inRail}`, or null |
 | `threads[].offsetPx` | Card top minus first mark top |
 | `threads[].replies` | Reply count |
+| `threads[].cardText` | The card's text content, so the original quote of a changed anchor, a suggestion's edit lines and a reply are assertable |
+| `threads[].cardActive`, `threads[].marksActive` | The card has `.on`; every mark of the thread has `.on`. A click on a mark or a card must set both |
+| `threads[].refCount`, `threads[].cardNumber` | The number of `a.cm-ref` elements after the thread's marks, and the number shown on the card. Both are null with numbers off |
 | `overlaps[]` | Pairs of thread ids whose cards intersect |
 | `orphans[]` | `{id, status}` for the threads listed after the document |
 | `gutter[]` | `{line, top}` as `buildGutter()` reads them, for comparison with comments hidden |
@@ -735,3 +742,71 @@ With comments shown, PDF export and `--export-pdf` print the highlights and the 
 - **A reftable repository** is watched through `reftable/`. A repository whose refs are only packed and updated by an external tool that does not write loose refs or reftable files is not watched, and the reader refreshes with ⌘R.
 - **The `source` text is passed twice** (the render and the payload). The cost is one file's text.
 - **Orphan and applied cards** use the full width below both columns, so they are wider than the cards in the rail.
+
+### 9.10 The comments acceptance run
+
+`cd macos && just comments-acceptance` runs `macos/ops/local/comments-acceptance.py`. The script runs `swift build` and `cargo build`, then runs the scenarios below. Each scenario makes a temporary git repository, writes comments with the real `marq-comments`, runs headless marq (`--dump-metrics -`, `--width`, `--harness-run`, and the flags of 9.5) with `MARQ_COMMENTS_BIN` set to the built CLI, and asserts on the `comments` block of 9.7. The first failed check stops a scenario and names the check, so the count of passing scenarios measures progress. The script writes `macos/.harness/comments-acceptance/index.html`, with a section for each scenario (verdict, failed check, comments metrics, screenshot in `shots/`), and prints its path. The page loads nothing external. The exit code is 0 when every scenario passes or is skipped, and 1 otherwise.
+
+| Recipe or flag | Effect |
+|---|---|
+| `just comments-acceptance` | Builds, runs every scenario, writes the page |
+| `just comments-acceptance-open` | The same, then opens the page (`open` on macOS, `xdg-open` elsewhere) |
+| `--only SLUG` | Runs the scenarios whose slug contains `SLUG` |
+| `--no-build` | Skips `swift build` and `cargo build` |
+| `--no-bundle` | Skips scenario 19, which runs `just bundle` |
+| `--self-test` | Runs the harness against stub programs and builds nothing |
+| `MARQ_COMMENTS_BIN` | Uses that CLI binary and skips `cargo build` |
+| `MARQ_BIN`, `PDFTOOL_BIN` | Use those binaries in place of `.build/debug/marq` and `.build/debug/pdftool` |
+
+| Scenario | Checks |
+|---|---|
+| 01 one word | One mark, `markedText` equals `anchorText`, mapper `ok`, layout `rail` at width 1400, card top within 4px of the mark top |
+| 02 whole line | The mark covers the line, and the card is in the rail |
+| 03 to 08 a word in bold, a code span, a link, a heading, a list item, a table cell | `markedText` equals the rendered word, in one mark |
+| 09 range across two blocks | Marks on two lines, `markedText` equals the range without whitespace, one thread, one card |
+| 10 two close threads | `overlaps` is empty, the second card top is at or below the first card's bottom |
+| 11 reply | One thread, `replies` is 1, one card |
+| 12 changed | Status `changed`, the new text is marked, a card exists. The original quote is asserted only where the metrics carry `cardText` |
+| 13 orphaned | Status `orphaned`, no marks, the thread is in `orphans[]`, `orphanCount` is 1 |
+| 14 accepted suggestion | State `accepted`, the replacement is marked, a card exists |
+| 15 applied deletion | Status `applied`, no marks, an `orphans[]` entry with status `applied` |
+| 16 numbers | `numbers` true then false, and the gutter, every mark top, every card top and `documentHeight` are unchanged |
+| 17 hidden | No marks and no rail, metrics other than `comments` equal a run on a copy with no comments, the gutter equals the shown gutter |
+| 18 PDF | Hidden page count and `--print` metrics equal the run with no comments. Shown `--print` metrics report no broken word and no overflow |
+| 19 bundle | `just bundle`, then `env -i HOME=$HOME build/Marq.app/Contents/MacOS/marq` reports the thread, so the app finds its own CLI with an empty `PATH` |
+| 20 click | `--comments-click mark:ID` and `card:ID` each set `active` to that thread's id |
+| 21 gutter | Gutter entries are identical shown, hidden and with numbers on, for the fixture and `example-docs/test.md` |
+| 22 to 26 no comments, no git repository, no CLI, a CLI that sleeps 30 seconds, an empty `MARQ_COMMENTS_BIN` | Metrics other than `comments` equal the plain baseline, and a `comments` block, if present, marks nothing. The hanging CLI also ends the run in under 20 seconds |
+| 27 new comment | A second process adds a comment during a long `--settle`, and the card is in the final metrics |
+| 28 narrow | At width 700 the layout is `stacked`, the card is below its mark, the gutter equals the hidden gutter |
+| 29 `just check` | Exit 0 with the baselines unchanged |
+
+| Decision | Reason |
+|---|---|
+| The gutter is read from `comments.gutter`, or from a top-level `gutter` when `comments` is absent | 9.7 puts `gutter[]` in the `comments` block, which exists only after a payload. A hidden run with a payload still reports it. |
+| Scenario 27 launches one headless run with `--settle 14` and adds the comment from the script 6 seconds after launch | The comment changes `md-comments` and leaves the markdown file untouched, so only the ref watch of 9.6 can show it. A background non-headless launch needs a window. |
+| The click scenario reads each thread's `id` from a first run and passes that string in the flag | The flag takes the id in the form the metrics use, whatever that form is. |
+| Scenario 12 asserts the original quote only when `threads[].cardText` exists | 9.7 has no field for card text. |
+| `--self-test` replaces marq, `marq-comments` and `pdftool` with stub scripts that follow 9.7, and then repeats seven scenarios with one deliberate fault each | A scenario that cannot fail proves nothing. The stub run shows each assertion passes on good metrics and fails on bad ones. |
+| Scenario 19 is skipped under `--no-bundle` even when a bundle exists | A bundle built earlier is not the code under test (CLAUDE.md). |
+
+### 9.11 CI
+
+`.github/workflows/comments.yml` runs on every push to `main` and on `workflow_dispatch`. The job runs on `macos-15` and runs these steps in order:
+
+| Step | Command |
+|---|---|
+| CLI tests | `cd cli && just test` |
+| CLI acceptance | `cd cli && just acceptance` |
+| Layout baselines | `cd macos && just check` |
+| Comments acceptance | `cd macos && just comments-acceptance` |
+
+The comments acceptance step and both upload steps run with `if: always()`. The workflow uploads `cli/target/acceptance/` as `cli-acceptance` and `macos/.harness/comments-acceptance/` as `comments-acceptance`, each kept for 14 days. A local run uses the same four commands.
+
+| Decision | Reason |
+|---|---|
+| The runner is `macos-15`, not `macos-latest` | `macos-latest` moves to a new image without a change in the repository. `macos-15` has Swift 6 and satisfies `swift-tools-version: 5.9` in `Package.swift`. |
+| The workflow installs `just` with `brew` and Rust with `dtolnay/rust-toolchain@stable` | The runner image has neither `just` nor a pinned Rust toolchain. |
+| The cargo cache key is `hashFiles('cli/Cargo.lock')` | The cache is replaced when a dependency changes. |
+| The workflow sets `init.defaultBranch`, `user.name` and `user.email` globally | The scenarios create temporary git repositories, and a runner has no git identity. |
+| `just check` fails the job without stopping the comments acceptance step | The results page uploads for every outcome. |

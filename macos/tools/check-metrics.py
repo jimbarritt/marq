@@ -17,6 +17,7 @@ move with any typographic change and would make the check noise.
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -45,7 +46,8 @@ TOLERANCE = {"fillPct": 0.5, "fontScale": 0.02, "maxTextWidthPt": 2.0}
 
 def run(args, capture_json=False):
     result = subprocess.run(
-        args, cwd=ROOT, capture_output=True, text=True, timeout=120)
+        args, cwd=ROOT, capture_output=True, text=True, timeout=120,
+        env={**os.environ, "MARQ_COMMENTS_BIN": ""})
     if result.returncode != 0:
         raise SystemExit(
             f"command failed ({result.returncode}): {' '.join(str(a) for a in args)}\n"

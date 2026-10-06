@@ -15,6 +15,11 @@ if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-
       --width N, --height N   window size, so a measurement is reproducible
       --settle SECONDS        how long to let the document settle (default 1.5)
       --timeout SECONDS       watchdog for headless runs (default 60, 0 disables)
+      --comments show|hide    show or hide comments (default: the stored option, or show)
+      --comment-numbers on|off
+                              number the comments (default: the stored option, or off)
+      --comments-click mark:ID|card:ID
+                              once comments are applied, click a thread's mark or card
       --harness-run           no-op tag so `just kill-probes` can find this
                               process by argument rather than by path
 

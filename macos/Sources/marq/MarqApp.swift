@@ -29,6 +29,9 @@ struct CLIOptions {
     var settle: Double = 1.5      // seconds to let mermaid/KaTeX/images stop moving
     var timeout: Double = 60      // headless watchdog; 0 disables
     var harnessRun = false        // tag in argv so kill-probes can find us
+    var commentsShown: Bool?
+    var commentNumbers: Bool?
+    var commentsClick: (kind: String, id: String)?
 
     /// Every harness-launched process carries this, so it can be found and
     /// killed by argument rather than by executable path. See the parser.
@@ -52,6 +55,15 @@ struct CLIOptions {
             case "--print":        o.printMetrics = true
             case "--width":        o.width = value().flatMap(Double.init).map { CGFloat($0) }
             case "--height":       o.height = value().flatMap(Double.init).map { CGFloat($0) }
+            case "--comments":     o.commentsShown = value().flatMap { $0 == "show" ? true : $0 == "hide" ? false : nil }
+            case "--comment-numbers": o.commentNumbers = value().flatMap { $0 == "on" ? true : $0 == "off" ? false : nil }
+            case "--comments-click":
+                if let v = value(), let colon = v.firstIndex(of: ":") {
+                    let kind = String(v[..<colon])
+                    if kind == "mark" || kind == "card" {
+                        o.commentsClick = (kind, String(v[v.index(after: colon)...]))
+                    }
+                }
             case "--settle":       o.settle = value().flatMap(Double.init) ?? o.settle
             case "--timeout":      o.timeout = value().flatMap(Double.init) ?? o.timeout
             // Does nothing here, and that is the point: it is a tag in argv so
@@ -98,6 +110,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusLabel: NSTextField!
     var statusBar: NSView!
     var resetScrollOnNextInject: Bool = false
+    var commentsShown = true
+    var commentNumbers = false
+    var commentsGeneration = 0
+    var commentsInput: CommentsInput?
+    var commentsOutcomeSeen = false
+    var commentsInFlight = 0
+    var commentsDelivering = 0
+    var renderInjected = false
+    var fileHasBOM = false
+    var fileReadable = false
+    var lastDeliveredPayload: String?
+    var commentsRefreshWork: DispatchWorkItem?
+    var commentWatchers: [DirectoryWatcher] = []
+    var commentWatchToken = 0
 
     // Text zoom. `pageZoom` scales the whole document — prose, gutter, search
     // box — which is what a reader means by zoom, and it leaves the native
@@ -120,6 +146,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Resolve file path from CLI args
         options = CLIOptions.parse(CommandLine.arguments)
+        resolveCommentOptions()
         if let path = options.file {
             filePath = AppDelegate.absolute(path)
         }
@@ -299,6 +326,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let zoomResetItem = NSMenuItem(title: "Actual Size", action: #selector(zoomReset), keyEquivalent: "0")
         zoomResetItem.keyEquivalentModifierMask = .command
         viewMenu.addItem(zoomResetItem)
+        addCommentMenuItems(to: viewMenu)
         let viewMenuItem = NSMenuItem()
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
@@ -648,12 +676,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func startWatching() {
         fileWatcher?.stop()
+        stopCommentWatchers()
         guard !filePath.isEmpty else { return }
         let watcher = FileWatcher(path: filePath) { [weak self] in
             self?.loadAndInject()
         }
         watcher.start()
         fileWatcher = watcher
+        startCommentWatchers()
     }
 
     func loadAndInject() {
@@ -662,8 +692,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             rawMarkdown = try String(contentsOfFile: filePath, encoding: .utf8)
             log("Read \(rawMarkdown.count) chars")
+            fileReadable = true
+            let prefix = FileHandle(forReadingAtPath: filePath).flatMap { handle -> Data? in
+                defer { try? handle.close() }
+                return try? handle.read(upToCount: 3)
+            }
+            fileHasBOM = prefix == Data([0xEF, 0xBB, 0xBF])
         } catch {
             log("ERROR reading file: \(error)")
+            fileReadable = false
+            fileHasBOM = false
             rawMarkdown = "**Error:** Could not read file `\(filePath)`\n\n\(error.localizedDescription)"
         }
         injectMarkdown()
@@ -674,17 +712,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Resolve relative image paths to absolute file:// URLs with a cache-busting
         // timestamp so WKWebView always re-reads from disk on each inject.
         var md = rawMarkdown
+        var edits: [[Any]] = []
         if !filePath.isEmpty {
             let baseDir = URL(fileURLWithPath: filePath).deletingLastPathComponent().path
             let cacheBuster = Int(Date().timeIntervalSince1970 * 1000)
             // Match ![alt](path) where path is relative (not http/https/file/data)
             let pattern = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\((?!https?://|file://|data:)([^)]+)\)"#)
-            md = pattern.stringByReplacingMatches(
-                in: md,
-                range: NSRange(md.startIndex..., in: md),
-                withTemplate: "![$1](file://\(baseDir)/$2?t=\(cacheBuster))"
-            )
+            let template = "![$1](file://\(baseDir)/$2?t=\(cacheBuster))"
+            let source = rawMarkdown
+            let range = NSRange(source.startIndex..., in: source)
+            edits = pattern.matches(in: source, range: range).map { match in
+                [match.range.location, match.range.length,
+                 pattern.replacementString(for: match, in: source, offset: 0, template: template)]
+            }
+            md = pattern.stringByReplacingMatches(in: source, range: range, withTemplate: template)
         }
+        renderInjected = false
+        recordCommentsInput(source: rawMarkdown, edits: edits)
 
         let escaped = md
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -705,9 +749,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.pendingScrollRestore = nil
                     self?.webView.evaluateJavaScript("restoreScroll(\(y));", completionHandler: nil)
                 }
+                self?.renderInjected = true
                 self?.runHeadlessTaskIfAny()
             }
         }
+        spawnComments()
     }
 
     static func absolute(_ path: String) -> String {
@@ -729,20 +775,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // is the trap: the export differs from the identical run a minute later.
     // Only one action runs per invocation, in this order of precedence.
     func runHeadlessTaskIfAny() {
-        guard options.isHeadless, !headlessStarted else { return }
+        guard options.isHeadless, !headlessStarted, renderInjected, commentsOutcomeSeen else { return }
         headlessStarted = true
+        var settleScript = "return await marqSettle();"
+        var settleArguments: [String: Any] = [:]
+        if let click = options.commentsClick {
+            settleScript = """
+            await marqSettle();
+            if (typeof commentsClick === 'function') { commentsClick(kind, id); }
+            return await marqSettle();
+            """
+            settleArguments = ["kind": click.kind, "id": click.id]
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + options.settle) {
             self.webView.callAsyncJavaScript(
-                "return await marqSettle();", arguments: [:], in: nil, in: .page
+                settleScript, arguments: settleArguments, in: nil, in: .page
             ) { _ in
-                if let out = self.options.dumpMetrics {
-                    self.dumpMetrics(to: out)
-                } else if let out = self.options.exportPNG {
-                    self.exportPNG(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
-                } else if let out = self.options.exportPDF {
-                    self.isHeadlessExport = true
-                    self.log("Exporting to \(out)")
-                    self.generatePDF(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
+                self.whenCommentsIdle {
+                    if let out = self.options.dumpMetrics {
+                        self.dumpMetrics(to: out)
+                    } else if let out = self.options.exportPNG {
+                        self.exportPNG(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
+                    } else if let out = self.options.exportPDF {
+                        self.isHeadlessExport = true
+                        self.log("Exporting to \(out)")
+                        self.generatePDF(to: URL(fileURLWithPath: AppDelegate.absolute(out)))
+                    }
                 }
             }
         }
@@ -876,6 +934,7 @@ extension AppDelegate: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         log("WebView navigation finished")
+        applyCommentOptions()
         loadAndInject()
     }
 
